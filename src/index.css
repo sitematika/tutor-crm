@@ -1,10 +1,13 @@
 :root {
-  --bg: #FFFFFF;
-  --surface: #FFFFFF;
-  --surface-2: #F2F4F7;
+  --bg: #EEF2F9;
+  --blob1: #D5E3FA;
+  --blob2: #E9E0F8;
+  --field: rgba(255, 255, 255, 0.6);
+  --surface: rgba(255, 255, 255, 0.66);
+  --surface-2: rgba(255, 255, 255, 0.5);
   --ink: #16181D;
   --muted: #5B6472;
-  --line: #E5E8ED;
+  --line: rgba(24, 34, 54, 0.1);
   --accent: #2563EB;
   --accent-ink: #FFFFFF;
   --accent-soft: #EAF0FE;
@@ -14,18 +17,21 @@
   --warn-bg: #F7EBD3;
   --bad: #B3372E;
   --bad-bg: #F8E4E2;
-  --shadow: 0 1px 2px rgba(23, 26, 31, 0.05), 0 4px 16px rgba(23, 26, 31, 0.06);
+  --shadow: 0 1px 1px rgba(31, 41, 64, 0.04), 0 10px 32px rgba(31, 41, 64, 0.1);
   --spot: rgba(37, 99, 235, 0.08);
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0B0C0E;
-    --surface: #151619;
-    --surface-2: #1E2024;
+    --bg: #0A0C10;
+    --blob1: rgba(52, 100, 220, 0.2);
+    --blob2: rgba(128, 86, 236, 0.13);
+    --field: rgba(255, 255, 255, 0.07);
+    --surface: rgba(31, 35, 45, 0.55);
+    --surface-2: rgba(255, 255, 255, 0.06);
     --ink: #ECEDEF;
     --muted: #9BA1AB;
-    --line: #26282D;
+    --line: rgba(255, 255, 255, 0.1);
     --accent: #FFFFFF;
     --accent-ink: #101114;
     --accent-soft: #1E2024;
@@ -41,12 +47,15 @@
   }
 }
 :root[data-theme="dark"] {
-  --bg: #0B0C0E;
-  --surface: #151619;
-  --surface-2: #1E2024;
+  --bg: #0A0C10;
+  --blob1: rgba(52, 100, 220, 0.2);
+  --blob2: rgba(128, 86, 236, 0.13);
+  --field: rgba(255, 255, 255, 0.07);
+  --surface: rgba(31, 35, 45, 0.55);
+  --surface-2: rgba(255, 255, 255, 0.06);
   --ink: #ECEDEF;
   --muted: #9BA1AB;
-  --line: #26282D;
+  --line: rgba(255, 255, 255, 0.1);
   --accent: #FFFFFF;
   --accent-ink: #101114;
   --accent-soft: #1E2024;
@@ -64,7 +73,11 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; }
 body {
-  background: var(--bg);
+  background:
+    radial-gradient(1000px 640px at 12% -8%, var(--blob1), transparent 60%),
+    radial-gradient(900px 600px at 105% 28%, var(--blob2), transparent 55%),
+    var(--bg);
+  background-attachment: fixed;
   color: var(--ink);
   font-family: "Manrope", "Segoe UI", system-ui, sans-serif;
   font-size: 14.5px;
@@ -75,6 +88,23 @@ button { font-family: inherit; font-size: inherit; color: inherit; cursor: point
 input, select, textarea { font-family: inherit; font-size: inherit; color: var(--ink); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 img { max-width: 100%; }
+
+/* ---- стекло (glassmorphism): матовые полупрозрачные панели ---- */
+.card-spotlight.stu-card, .profile, .table-wrap, .stat, .chartcard, .week-wrap,
+.modal, .login-card, .pcard, .empty, .bottombar {
+  backdrop-filter: blur(22px) saturate(1.5);
+  -webkit-backdrop-filter: blur(22px) saturate(1.5);
+}
+.btn, .theme-btn, .seg button, .weeknav input.weekpick, .weeknav select.weekpick {
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+/* лёгкое «нажатие» как в iOS */
+.btn, .tick, .ltick, .seg button, .bottombar button, .theme-btn, .paybtn, .card-spotlight.stu-card {
+  transition: transform 0.13s ease, background 0.15s, border-color 0.15s, box-shadow 0.2s;
+}
+.btn:active, .tick:active, .ltick:active, .seg button:active,
+.bottombar button:active, .theme-btn:active, .paybtn:active { transform: scale(0.96); }
 
 .app { max-width: 1120px; margin: 0 auto; padding: 20px 24px 64px; }
 
@@ -286,20 +316,24 @@ table.pay td.mutedcell { color: var(--muted); }
 .stu-name small { color: var(--muted); font-weight: 500; font-size: 12px; }
 
 /* ---- modal ---- */
-.overlay { position: fixed; inset: 0; background: rgba(15, 22, 18, 0.45); display: flex; align-items: flex-start; justify-content: center; padding: 6vh 16px 16px; z-index: 20; overflow-y: auto; }
+.overlay {
+  position: fixed; inset: 0; background: rgba(8, 10, 16, 0.35);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  display: flex; align-items: flex-start; justify-content: center; padding: 6vh 16px 16px; z-index: 20; overflow-y: auto;
+}
 .modal { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); width: 100%; max-width: 520px; padding: 22px 24px; }
 .modal h3 { font-weight: 800; font-size: 19px; margin: 0 0 16px; letter-spacing: -0.01em; }
 .field { margin-bottom: 13px; }
 .field label { display: block; font-size: 12.5px; font-weight: 700; color: var(--muted); margin-bottom: 4px; }
 .field input, .field select, .field textarea {
-  width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--bg);
+  width: 100%; border: 1px solid var(--line); border-radius: 10px; background: var(--field);
   padding: 8px 10px;
 }
 .field textarea { resize: vertical; min-height: 64px; }
 .frow { display: flex; gap: 10px; flex-wrap: wrap; }
 .frow .field { flex: 1 1 100px; min-width: 105px; }
 .slot-edit { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
-.slot-edit select, .slot-edit input { border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 7px 8px; }
+.slot-edit select, .slot-edit input { border: 1px solid var(--line); border-radius: 10px; background: var(--field); padding: 7px 8px; }
 .slot-edit select.day { width: 66px; }
 .slot-edit input.time { width: 96px; }
 .slot-edit select.dur { width: 88px; }
