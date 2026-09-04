@@ -750,7 +750,10 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
 
   const hours = []
   for (let h = minH; h <= maxH; h++) hours.push(h)
-  const colH = (maxH - minH) * PX_PER_HOUR
+  // на телефоне час выше — в блок урока влезает вся информация,
+  // а сам календарь скроллится по вертикали
+  const pxh = compact ? 78 : PX_PER_HOUR
+  const colH = (maxH - minH) * pxh
 
   if (!lessons.length) return (
     <div className="empty">
@@ -775,7 +778,7 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
           ))}
           <div className="timecol" style={{ height: colH }}>
             {hours.map(h => (
-              <span className="hr" key={h} style={{ top: (h - minH) * PX_PER_HOUR }}>{h}:00</span>
+              <span className="hr" key={h} style={{ top: (h - minH) * pxh }}>{h}:00</span>
             ))}
           </div>
           {dates.map((_, di) => {
@@ -783,7 +786,7 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
             return (
               <div className={'daycol' + (iso(dates[di]) === todayIso ? ' today' : '')} key={di} style={{ height: colH }}>
                 {hours.slice(1).map(h => (
-                  <div className="hline" key={h} style={{ top: (h - minH) * PX_PER_HOUR }} />
+                  <div className="hline" key={h} style={{ top: (h - minH) * pxh }} />
                 ))}
                 {dayItems.map(l => (
                   <div className={'lesson' + (l.type === 'Пробный' ? ' trial' : '') + (l.done ? ' isdone' : '') + (l.cancelled ? ' iscancel' : '')} key={l.key + l.student.id}
@@ -791,8 +794,8 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
                     onClick={() => onLessonClick(l)}
                     onKeyDown={e => { if (e.key === 'Enter') onLessonClick(l) }}
                     style={{
-                      top: (l.startMin - minH * 60) / 60 * PX_PER_HOUR + 1,
-                      height: l.dur / 60 * PX_PER_HOUR - 3,
+                      top: (l.startMin - minH * 60) / 60 * pxh + 1,
+                      height: l.dur / 60 * pxh - 3,
                       left: `calc(${(100 / l.lanes) * l.lane}% + 3px)`,
                       width: `calc(${100 / l.lanes}% - 6px)`,
                       '--stu': COLORS[l.student.colorIdx % COLORS.length],

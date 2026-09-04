@@ -350,7 +350,10 @@ table.pay td.mutedcell { color: var(--muted); }
 .check-line input { accent-color: var(--accent); width: 16px; height: 16px; }
 .seg { display: flex; gap: 6px; }
 .seg.scopeseg { flex: none; }
-.seg.scopeseg button { flex: none; padding: 6px 14px; min-height: 0; }
+.seg.scopeseg button { flex: none; padding: 6px 14px; }
+/* все контролы календаря одной высоты с кнопкой «+ Урок» */
+.viewhead > .btn.primary, .weeknav .btn, .weeknav input.weekpick,
+.weeknav select.weekpick, .seg.scopeseg button { min-height: 40px; }
 .seg button {
   flex: 1; border: 1px solid var(--line); background: var(--surface); border-radius: 8px;
   padding: 8px 6px; font-weight: 600; font-size: 13.5px;
@@ -431,9 +434,17 @@ table.pay td.mutedcell { color: var(--muted); }
   .viewhead > .btn.primary { flex: 1 1 100%; }
   .weeknav { width: 100%; justify-content: space-between; }
   .weeknav .btn { flex: 1; }
-  .weeknav input.weekpick, .weeknav select.weekpick { flex: 1 1 45%; max-width: none; min-height: 40px; }
+  .weeknav input.weekpick, .weeknav select.weekpick { flex: 1 1 45%; max-width: none; }
+  /* одна высота у всех контролов — как у «+ Урок» (46px) */
+  .viewhead > .btn.primary, .weeknav .btn, .weeknav input.weekpick,
+  .weeknav select.weekpick, .seg.scopeseg button { min-height: 46px; }
+  .seg.scopeseg { flex: 1 1 100%; }
+  .seg.scopeseg button { flex: 1; }
   .lticks { flex-direction: column; gap: 2px; }
   .lesson { padding-right: 26px; }
+  /* календарь скроллится по вертикали, шапка дней прилипает */
+  .week-wrap { max-height: calc(100dvh - 330px); overflow-y: auto; }
+  .wh { position: sticky; top: 0; background: var(--surface); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); z-index: 3; }
 
   .cards { grid-template-columns: 1fr; }
   .stats { grid-template-columns: 1fr 1fr; }
