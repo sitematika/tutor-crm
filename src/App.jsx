@@ -140,6 +140,23 @@ const IcoPay = () => (
     <rect x="1" y="4" width="22" height="16" rx="2" /><line x1="1" y1="10" x2="23" y2="10" />
   </svg>
 )
+const IcoSun = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+  </svg>
+)
+const IcoMoon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+  </svg>
+)
+const IcoOut = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+    <polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
+  </svg>
+)
 
 /* Тип урока: обычный (пусто), пробный или уровень CEFR */
 function TypeOptions() {
@@ -545,7 +562,9 @@ function ProfileView({ student: s, onBack, onEdit, onPay, onTick, onRemoveExtra,
 }
 
 /* ---------- week view ---------- */
-const PX_PER_HOUR = 46
+const PX_PER_HOUR = 42
+const DAY_START = 7  // календарь всегда показывает 7:00–21:00 целиком
+const DAY_END = 21
 
 function layoutLanes(items) {
   const sorted = items.slice().sort((a, b) => a.startMin - b.startMin)
@@ -587,10 +606,13 @@ function WeekView({ students, weekStart, onLessonClick, onAddLesson, onToggleMar
     })
   }, [students, dates])
 
+  // диапазон фиксированный 7:00–21:00; расширяется, только если урок выходит за него
   const [minH, maxH] = useMemo(() => {
-    if (!lessons.length) return [9, 20]
-    const lo = Math.min(...lessons.map(l => Math.floor(l.startMin / 60)))
-    const hi = Math.max(...lessons.map(l => Math.ceil((l.startMin + l.dur) / 60)))
+    let lo = DAY_START, hi = DAY_END
+    for (const l of lessons) {
+      lo = Math.min(lo, Math.floor(l.startMin / 60))
+      hi = Math.max(hi, Math.ceil((l.startMin + l.dur) / 60))
+    }
     return [Math.max(0, lo), Math.min(24, hi)]
   }, [lessons])
 
@@ -702,9 +724,11 @@ function LessonDialog({ student: s, lesson, onSave, onOpenProfile, onToggleMark,
         </div>
         {status === 'done' && initialStatus !== 'done' && (
           <p className="hint">
-            {s.paidTick
-              ? 'Стоит галочка «оплачен отдельно» — она снимется, счёт не изменится.'
-              : `Со счёта спишется ${fmtMoney(s.rate)}.`}
+            {paid
+              ? 'Урок отмечен оплаченным — счёт не изменится.'
+              : s.paidTick
+                ? 'Стоит галочка «оплачен отдельно» — она снимется, счёт не изменится.'
+                : `Со счёта спишется ${fmtMoney(s.rate)}.`}
           </p>
         )}
         {status === 'cancelled' && (
@@ -858,14 +882,14 @@ function AuthGate({ onAuth }) {
       if (p1 !== p2) return setErr('Пароли не совпадают.')
       try {
         localStorage.setItem(PASS_KEY, await hashPass(p1))
-        sessionStorage.setItem(AUTH_KEY, '1')
+        localStorage.setItem(AUTH_KEY, '1')
       } catch { /* приватный режим */ }
       onAuth()
     } else {
       let stored = null
       try { stored = localStorage.getItem(PASS_KEY) } catch { /* приватный режим */ }
       if (await hashPass(p1) === stored) {
-        try { sessionStorage.setItem(AUTH_KEY, '1') } catch { /* приватный режим */ }
+        try { localStorage.setItem(AUTH_KEY, '1') } catch { /* приватный режим */ }
         onAuth()
       } else setErr('Неверный пароль.')
     }
@@ -1008,7 +1032,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
     next.log = (s.log || []).filter(e => !isEntry(e))
     if (prevEntry && prevEntry.charged !== false) {
       if (prevEntry.paidBy === 'tick') next.paidTick = true
-      else next.balance = (next.balance || 0) + (next.rate || 0)
+      else if (prevEntry.paidBy !== 'mark') next.balance = (next.balance || 0) + (next.rate || 0)
     }
 
     // домашка этого урока — отдельной записью со статусом «сделано/нет»
@@ -1026,9 +1050,10 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
       const willCharge = status === 'done' ? true : !!charge
       let paidBy
       if (willCharge) {
-        paidBy = next.paidTick ? 'tick' : 'balance'
-        if (paidBy === 'tick') next.paidTick = false
-        else next.balance = (next.balance || 0) - (next.rate || 0)
+        // урок с отметкой «оплачен» уже покрыт — счёт не трогаем
+        if ((s.marks || {})[lessonKey(lesson)]) paidBy = 'mark'
+        else if (next.paidTick) { paidBy = 'tick'; next.paidTick = false }
+        else { paidBy = 'balance'; next.balance = (next.balance || 0) - (next.rate || 0) }
       }
       next.log = [...next.log, {
         date: lesson.date, start: lesson.start, dur: lesson.dur, type: lesson.type,
@@ -1095,10 +1120,14 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
           <button className={tab === 'week' ? 'on' : ''} onClick={() => showTab('week')}>Неделя</button>
           <button className={tab === 'pay' ? 'on' : ''} onClick={() => showTab('pay')}>Оплаты</button>
         </nav>
-        <button className="theme-btn" onClick={toggle} title="Переключить тему" aria-label="Переключить светлую/тёмную тему">
-          {isDark ? '☀️' : '🌙'}
-        </button>
-        <button className="btn sm" onClick={onLogout}>Выйти</button>
+        <div className="hdr-actions">
+          <button className="theme-btn" onClick={toggle} title="Переключить тему" aria-label="Переключить светлую/тёмную тему">
+            {isDark ? <IcoSun /> : <IcoMoon />}
+          </button>
+          <button className="theme-btn" onClick={onLogout} title="Выйти" aria-label="Выйти">
+            <IcoOut />
+          </button>
+        </div>
       </header>
 
       {tab === 'students' && !open && (
@@ -1236,7 +1265,7 @@ function ServerAuthGate({ hasTeacher, onAuth }) {
     setBusy(true)
     try {
       const r = await api(hasTeacher ? 'login' : 'setup', { pass: p1 })
-      try { sessionStorage.setItem(TOKEN_KEY, r.token) } catch { /* приватный режим */ }
+      try { localStorage.setItem(TOKEN_KEY, r.token) } catch { /* приватный режим */ }
       onAuth(r.token)
     } catch (e2) {
       setErr(e2.code === 'bad_password' ? 'Неверный пароль.' : 'Не получилось войти, попробуйте ещё раз.')
@@ -1376,10 +1405,14 @@ function StudentApp({ join }) {
       <header className="top">
         <span className="wordmark">A-teacher <em>CRM</em></span>
         <span className="spacer" style={{ flex: 1 }} />
-        <button className="theme-btn" onClick={toggle} title="Переключить тему" aria-label="Переключить светлую/тёмную тему">
-          {isDark ? '☀️' : '🌙'}
-        </button>
-        <button className="btn sm" onClick={logout}>Выйти</button>
+        <div className="hdr-actions">
+          <button className="theme-btn" onClick={toggle} title="Переключить тему" aria-label="Переключить светлую/тёмную тему">
+            {isDark ? <IcoSun /> : <IcoMoon />}
+          </button>
+          <button className="theme-btn" onClick={logout} title="Выйти" aria-label="Выйти">
+            <IcoOut />
+          </button>
+        </div>
       </header>
       <div className="viewhead">
         <h2>{stu.name}</h2>
@@ -1443,10 +1476,10 @@ export default function App() {
   }, [])
   const [boot, setBoot] = useState(null)
   const [token, setToken] = useState(() => {
-    try { return sessionStorage.getItem(TOKEN_KEY) } catch { return null }
+    try { return localStorage.getItem(TOKEN_KEY) } catch { return null }
   })
   const [localAuthed, setLocalAuthed] = useState(() => {
-    try { return sessionStorage.getItem(AUTH_KEY) === '1' } catch { return false }
+    try { return localStorage.getItem(AUTH_KEY) === '1' } catch { return false }
   })
 
   useEffect(() => {
@@ -1469,7 +1502,7 @@ export default function App() {
 
   if (boot.server) {
     const authFail = () => {
-      try { sessionStorage.removeItem(TOKEN_KEY) } catch { /* приватный режим */ }
+      try { localStorage.removeItem(TOKEN_KEY) } catch { /* приватный режим */ }
       setToken(null)
     }
     if (!token) return <ServerAuthGate hasTeacher={boot.hasTeacher} onAuth={setToken} />
@@ -1478,7 +1511,7 @@ export default function App() {
 
   // локальный режим (без api.php): всё как раньше, в localStorage
   const logoutLocal = () => {
-    try { sessionStorage.removeItem(AUTH_KEY) } catch { /* приватный режим */ }
+    try { localStorage.removeItem(AUTH_KEY) } catch { /* приватный режим */ }
     setLocalAuthed(false)
   }
   return localAuthed
