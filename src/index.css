@@ -182,6 +182,14 @@ nav.tabs button.on { background: var(--accent); color: var(--accent-ink); }
 .slot-line .t { color: var(--muted); margin-left: auto; }
 .payrow { display: flex; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
 .payrow:last-child { border-bottom: none; }
+.logcard {
+  border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; margin-bottom: 8px;
+  background: var(--bg);
+}
+.logcard .logtop { display: flex; gap: 10px; align-items: baseline; font-variant-numeric: tabular-nums; }
+.logcard .logtop b { font-weight: 700; }
+.logcard .logtop span { color: var(--muted); font-size: 12.5px; margin-left: auto; }
+.logcard .loghw { margin: 4px 0 0; color: var(--muted); font-size: 13px; white-space: pre-wrap; }
 .payrow .amt { margin-left: auto; font-weight: 600; }
 .balance-big { display: flex; align-items: baseline; gap: 8px; margin: 2px 0 10px; }
 .balance-big b { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
@@ -191,7 +199,7 @@ nav.tabs button.on { background: var(--accent); color: var(--accent-ink); }
 
 /* ---- week grid ---- */
 .week-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
-.week { display: grid; grid-template-columns: 52px repeat(7, minmax(118px, 1fr)); min-width: 900px; }
+.week { display: grid; grid-template-columns: 48px repeat(7, minmax(84px, 1fr)); min-width: 640px; }
 .wh { padding: 10px 8px; text-align: center; font-weight: 700; font-size: 13px; border-bottom: 1px solid var(--line); border-left: 1px solid var(--line); }
 .wh:first-child { border-left: none; }
 .wh .dnum { display: block; font-weight: 500; color: var(--muted); font-size: 12px; }
@@ -203,14 +211,16 @@ nav.tabs button.on { background: var(--accent); color: var(--accent-ink); }
 .daycol.today { background: var(--accent-soft); }
 .hline { position: absolute; left: 0; right: 0; border-top: 1px solid var(--line); opacity: 0.55; }
 .lesson {
-  position: absolute; border-radius: 8px; padding: 5px 8px; overflow: hidden;
+  position: absolute; border-radius: 7px; padding: 3px 7px; overflow: hidden;
   background: color-mix(in oklab, var(--stu) 16%, var(--surface));
   border-left: 3px solid var(--stu);
-  font-size: 12.5px; line-height: 1.3; cursor: pointer;
+  font-size: 11.5px; line-height: 1.25; cursor: pointer;
 }
+.lesson.isdone { opacity: 0.55; }
+.lesson.isdone b { text-decoration: line-through; text-decoration-thickness: 1px; }
 .lesson { padding-right: 26px; }
 .lesson b { display: block; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lesson span { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 11.5px; }
+.lesson span { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 10.5px; }
 .lesson.trial {
   border-left-color: var(--warn);
   background: color-mix(in oklab, var(--warn) 14%, var(--surface));

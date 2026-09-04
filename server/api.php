@@ -161,6 +161,7 @@ switch ($action) {
       'name' => $s['name'] ?? '',
       'level' => $s['level'] ?? '',
       'grade' => $s['grade'] ?? '',
+      'age' => $s['age'] ?? '',
       'homework' => $s['homework'] ?? '',
       'bookmark' => $s['bookmark'] ?? '',
       'slots' => $s['slots'] ?? [],

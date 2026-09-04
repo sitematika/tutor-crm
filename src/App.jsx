@@ -7,7 +7,6 @@ import FadeContent from './reactbits/FadeContent.jsx'
 const DAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 const LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
 const DURATIONS = [30, 45, 60, 90]
-const GRADES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 const COLORS = ['#4E79A7', '#B3623F', '#5F9E6E', '#8B6BB1', '#C2903A', '#3E8F8F', '#B15B7D', '#7A8450']
 const STORAGE_KEY = 'tutor-crm-students-v2'
 
@@ -33,6 +32,16 @@ const mondayOf = d => {
 }
 const addDays = (d, n) => { const c = new Date(d); c.setDate(c.getDate() + n); return c }
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
+const yearsWord = n => {
+  const a = n % 100, b = n % 10
+  if (a >= 11 && a <= 14) return 'лет'
+  if (b === 1) return 'год'
+  if (b >= 2 && b <= 4) return 'года'
+  return 'лет'
+}
+// возраст; для учеников, заведённых раньше с «классом школы», показываем класс
+const ageLabel = s => (s.age ? `${s.age} ${yearsWord(Number(s.age))}` : s.grade ? `${s.grade} кл.` : '')
+const lessonKey = l => l.date + '|' + l.start
 
 /* Статус оплаты: ручная галочка > денежный счёт */
 function payStatus(s) {
@@ -155,7 +164,7 @@ function Modal({ title, onClose, children }) {
 /* ---------- student form ---------- */
 function StudentForm({ initial, onSave, onClose, onDelete }) {
   const [f, setF] = useState(() => initial || {
-    name: '', level: 'B1', grade: '', rate: 500, contact: '', notes: '', homework: '', bookmark: '', balance: 0,
+    name: '', level: 'B1', age: '', rate: 500, contact: '', notes: '', homework: '', bookmark: '', balance: 0,
     slots: [{ day: 0, start: '16:00', dur: 60 }],
     payments: [], colorIdx: 0, paidTick: false,
   })
@@ -183,11 +192,9 @@ function StudentForm({ initial, onSave, onClose, onDelete }) {
             </select>
           </div>
           <div className="field">
-            <label htmlFor="f-grade">Класс школы</label>
-            <select id="f-grade" value={f.grade || ''} onChange={e => set('grade', e.target.value)}>
-              <option value="">— (взрослый)</option>
-              {GRADES.map(g => <option key={g} value={g}>{g} класс</option>)}
-            </select>
+            <label htmlFor="f-age">Возраст</label>
+            <input id="f-age" type="number" min="3" max="99" value={f.age || ''} placeholder="—"
+              onChange={e => set('age', e.target.value)} />
           </div>
           <div className="field">
             <label htmlFor="f-rate">Ставка, ₴ / урок</label>
@@ -364,7 +371,7 @@ function StudentsView({ students, onOpen, onAdd, onTick }) {
                 <Ava student={s} />
                 <h3>{s.name}</h3>
                 <Tick student={s} onToggle={onTick} />
-                <span className="lvl">{s.level}{s.grade ? ` · ${s.grade} кл.` : ''}</span>
+                <span className="lvl">{s.level}{ageLabel(s) ? ` · ${ageLabel(s)}` : ''}</span>
               </div>
               <div className="meta">
                 <span>{next ? 'Следующий урок: ' + next : 'Расписание не задано'}</span>
@@ -399,7 +406,7 @@ function InviteLink({ join }) {
   )
 }
 
-function ProfileView({ student: s, onBack, onEdit, onLessonDone, onPay, onTick, onRemoveExtra, serverMode, onMakeJoin }) {
+function ProfileView({ student: s, onBack, onEdit, onPay, onTick, onRemoveExtra, serverMode, onMakeJoin }) {
   const payments = (s.payments || []).slice().reverse()
   const lessonsLeft = s.rate > 0 && s.balance > 0 ? Math.floor(s.balance / s.rate) : 0
   return (
@@ -408,12 +415,11 @@ function ProfileView({ student: s, onBack, onEdit, onLessonDone, onPay, onTick, 
         <Ava student={s} size={44} />
         <div>
           <h2>{s.name}</h2>
-          <span className="sub">Уровень {s.level}{s.grade ? ` · ${s.grade} класс` : ''} · {fmtMoney(s.rate)} / урок</span>
+          <span className="sub">Уровень {s.level}{ageLabel(s) ? ` · ${ageLabel(s)}` : ''} · {fmtMoney(s.rate)} / урок</span>
         </div>
         <div className="actions">
           <button className="btn" onClick={onBack}>← Ко всем</button>
           <button className="btn" onClick={onEdit}>Редактировать</button>
-          <button className="btn" onClick={onLessonDone}>Урок проведён</button>
           <button className="btn primary" onClick={onPay}>+ Оплата</button>
         </div>
       </div>
@@ -485,6 +491,18 @@ function ProfileView({ student: s, onBack, onEdit, onLessonDone, onPay, onTick, 
                 </div>
               ))
             : <p style={{ color: 'var(--muted)', margin: 0 }}>Оплат ещё не было.</p>}
+          <h4>Проведённые уроки</h4>
+          {(s.log || []).length
+            ? s.log.slice().reverse().map((e, i) => (
+                <div className="logcard" key={i}>
+                  <div className="logtop">
+                    <b>{fmtDate(e.date)}</b>
+                    <span>{e.start}–{endTime(e.start, e.dur)} · {e.dur} мин{e.type ? ' · ' + e.type : ''}</span>
+                  </div>
+                  {e.hw && <p className="loghw">ДЗ: {e.hw}</p>}
+                </div>
+              ))
+            : <p style={{ color: 'var(--muted)', margin: 0 }}>Отмечайте уроки проведёнными в календаре — история появится здесь.</p>}
         </div>
       </div>
     </div>
@@ -492,7 +510,7 @@ function ProfileView({ student: s, onBack, onEdit, onLessonDone, onPay, onTick, 
 }
 
 /* ---------- week view ---------- */
-const PX_PER_HOUR = 60
+const PX_PER_HOUR = 46
 
 function layoutLanes(items) {
   const sorted = items.slice().sort((a, b) => a.startMin - b.startMin)
@@ -507,7 +525,7 @@ function layoutLanes(items) {
   return sorted
 }
 
-function WeekView({ students, weekStart, onOpen, onAddLesson, onToggleMark }) {
+function WeekView({ students, weekStart, onLessonClick, onAddLesson, onToggleMark }) {
   const dates = useMemo(() => DAYS.map((_, i) => addDays(weekStart, i)), [weekStart])
   const todayIso = iso(new Date())
 
@@ -523,8 +541,12 @@ function WeekView({ students, weekStart, onOpen, onAddLesson, onToggleMark }) {
       })
     })
     return items.map(l => {
-      const key = l.date + '|' + l.start
-      return { ...l, key, paid: !!((l.student.marks || {})[key]) }
+      const key = lessonKey(l)
+      return {
+        ...l, key,
+        paid: !!((l.student.marks || {})[key]),
+        done: (l.student.log || []).some(e => e.date === l.date && e.start === l.start),
+      }
     })
   }, [students, dates])
 
@@ -570,10 +592,10 @@ function WeekView({ students, weekStart, onOpen, onAddLesson, onToggleMark }) {
                   <div className="hline" key={h} style={{ top: (h - minH) * PX_PER_HOUR }} />
                 ))}
                 {dayItems.map(l => (
-                  <div className={'lesson' + (l.type === 'Пробный' ? ' trial' : '')} key={l.key + l.student.id}
+                  <div className={'lesson' + (l.type === 'Пробный' ? ' trial' : '') + (l.done ? ' isdone' : '')} key={l.key + l.student.id}
                     role="button" tabIndex={0}
-                    onClick={() => onOpen(l.student.id)}
-                    onKeyDown={e => { if (e.key === 'Enter') onOpen(l.student.id) }}
+                    onClick={() => onLessonClick(l)}
+                    onKeyDown={e => { if (e.key === 'Enter') onLessonClick(l) }}
                     style={{
                       top: (l.startMin - minH * 60) / 60 * PX_PER_HOUR + 1,
                       height: l.dur / 60 * PX_PER_HOUR - 3,
@@ -581,7 +603,7 @@ function WeekView({ students, weekStart, onOpen, onAddLesson, onToggleMark }) {
                       width: `calc(${100 / l.lanes}% - 6px)`,
                       '--stu': COLORS[l.student.colorIdx % COLORS.length],
                     }}>
-                    <b>{l.student.name}</b>
+                    <b>{l.done ? '✓ ' : ''}{l.student.name}</b>
                     <span>{l.start}–{endTime(l.start, l.dur)}{l.type ? ' · ' + l.type : ''}{l.once ? ' · разовый' : ''}</span>
                     <button
                       className={'ltick' + (l.paid ? ' on' : '')}
@@ -597,8 +619,58 @@ function WeekView({ students, weekStart, onOpen, onAddLesson, onToggleMark }) {
           })}
         </div>
       </div>
-      <p className="weeknote">Клик по уроку открывает профиль ученика, галочка на уроке — отметка «оплачено» для этой даты.</p>
+      <p className="weeknote">Клик по уроку — отметить проведённым и записать домашку; маленькая галочка в углу — отметка «оплачено».</p>
     </>
+  )
+}
+
+/* ---------- окно урока в календаре ---------- */
+function LessonDialog({ student: s, lesson, onSave, onOpenProfile, onToggleMark, onClose }) {
+  const wasDone = (s.log || []).some(e => e.date === lesson.date && e.start === lesson.start)
+  const [done, setDone] = useState(wasDone)
+  const [hw, setHw] = useState(s.homework || '')
+  const paid = !!((s.marks || {})[lesson.key])
+
+  const submit = e => {
+    e.preventDefault()
+    onSave({ lesson, done, wasDone, hw })
+  }
+
+  return (
+    <Modal title={s.name} onClose={onClose}>
+      <p className="hint" style={{ marginTop: -10 }}>
+        {DAYS[lesson.day]}, {fmtDate(lesson.date)} · {lesson.start}–{endTime(lesson.start, lesson.dur)} · {lesson.dur} мин
+        {lesson.type ? ' · ' + lesson.type : ''}
+      </p>
+      <form onSubmit={submit}>
+        <label className="check-line">
+          <input type="checkbox" checked={done} onChange={e => setDone(e.target.checked)} />
+          <span>Урок проведён</span>
+        </label>
+        {done && !wasDone && (
+          <p className="hint">
+            {s.paidTick
+              ? 'Стоит галочка «оплачен отдельно» — она снимется, счёт не изменится.'
+              : `Со счёта спишется ${fmtMoney(s.rate)}.`}
+          </p>
+        )}
+        {!done && wasDone && <p className="hint">Отметка снимется, списание вернётся на счёт.</p>}
+        <div className="field" style={{ marginTop: 10 }}>
+          <label htmlFor="ld-hw">Домашнее задание к следующему уроку</label>
+          <textarea id="ld-hw" value={hw} onChange={e => setHw(e.target.value)}
+            placeholder="Ученик увидит это в своём кабинете" />
+        </div>
+        <label className="check-line">
+          <input type="checkbox" checked={paid} onChange={() => onToggleMark(s, lesson.key)} />
+          <span>Этот урок оплачен</span>
+        </label>
+        <div className="mfoot">
+          <button type="button" className="btn ghost left" onClick={onOpenProfile}>Профиль ученика →</button>
+          <button type="button" className="btn" onClick={onClose}>Отмена</button>
+          <button type="submit" className="btn primary">Сохранить</button>
+        </div>
+      </form>
+    </Modal>
   )
 }
 
@@ -649,7 +721,7 @@ function PaymentsView({ students, onOpen, onPay, onTick }) {
                   <td>
                     <span className="stu-cell">
                       <Ava student={s} size={28} />
-                      <span className="stu-name">{s.name}<small>{s.level}{s.grade ? ` · ${s.grade} кл.` : ''} · {fmtMoney(s.rate)}/ур.</small></span>
+                      <span className="stu-name">{s.name}<small>{s.level}{ageLabel(s) ? ` · ${ageLabel(s)}` : ''} · {fmtMoney(s.rate)}/ур.</small></span>
                     </span>
                   </td>
                   <td onClick={e => e.stopPropagation()}><Tick student={s} onToggle={onTick} /></td>
@@ -781,6 +853,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
   const [editing, setEditing] = useState(null) // null | 'new' | studentId
   const [payingId, setPayingId] = useState(null)
   const [addingLesson, setAddingLesson] = useState(false)
+  const [lessonDlg, setLessonDlg] = useState(null) // { studentId, lesson }
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()))
   const { isDark, toggle } = useTheme()
 
@@ -842,9 +915,30 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
 
   const handleTick = s => save(s.id, { ...s, paidTick: !s.paidTick })
 
-  const handleLessonDone = s => {
-    if (s.paidTick) save(s.id, { ...s, paidTick: false })
-    else save(s.id, { ...s, balance: (s.balance || 0) - (s.rate || 0) })
+  // сохранение из окна урока: отметка «проведён» (со списанием/возвратом) + домашка
+  const handleLessonDialogSave = ({ lesson, done, wasDone, hw }) => {
+    const s = byId(lessonDlg.studentId)
+    if (!s) { setLessonDlg(null); return }
+    const next = { ...s, homework: hw }
+    const isEntry = e => e.date === lesson.date && e.start === lesson.start
+    if (done && !wasDone) {
+      const paidBy = s.paidTick ? 'tick' : 'balance'
+      if (paidBy === 'tick') next.paidTick = false
+      else next.balance = (next.balance || 0) - (next.rate || 0)
+      next.log = [...(s.log || []), {
+        date: lesson.date, start: lesson.start, dur: lesson.dur,
+        type: lesson.type, hw: hw || undefined, paidBy,
+      }]
+    } else if (!done && wasDone) {
+      const entry = (s.log || []).find(isEntry)
+      next.log = (s.log || []).filter(e => !isEntry(e))
+      if (entry && entry.paidBy === 'tick') next.paidTick = true
+      else next.balance = (next.balance || 0) + (next.rate || 0)
+    } else if (done && wasDone) {
+      next.log = (s.log || []).map(e => (isEntry(e) ? { ...e, hw: hw || undefined } : e))
+    }
+    save(s.id, next)
+    setLessonDlg(null)
   }
 
   const handlePaySave = p => {
@@ -918,7 +1012,6 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
           student={open}
           onBack={() => setOpenId(null)}
           onEdit={() => setEditing(open.id)}
-          onLessonDone={() => handleLessonDone(open)}
           onPay={() => setPayingId(open.id)}
           onTick={handleTick}
           onRemoveExtra={i => handleRemoveExtra(open, i)}
@@ -947,7 +1040,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
           </div>
           <WeekView students={students}
             weekStart={weekStart}
-            onOpen={id => { setTab('students'); setOpenId(id) }}
+            onLessonClick={l => setLessonDlg({ studentId: l.student.id, lesson: l })}
             onAddLesson={() => setAddingLesson(true)}
             onToggleMark={handleToggleMark} />
         </FadeContent>
@@ -976,6 +1069,17 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
       )}
 
       {paying && <PaymentForm student={paying} onSave={handlePaySave} onClose={() => setPayingId(null)} />}
+
+      {lessonDlg && byId(lessonDlg.studentId) && (
+        <LessonDialog
+          student={byId(lessonDlg.studentId)}
+          lesson={lessonDlg.lesson}
+          onSave={handleLessonDialogSave}
+          onToggleMark={handleToggleMark}
+          onOpenProfile={() => { setTab('students'); setOpenId(lessonDlg.studentId); setLessonDlg(null) }}
+          onClose={() => setLessonDlg(null)}
+        />
+      )}
 
       {addingLesson && (
         <LessonForm students={students}
@@ -1158,7 +1262,7 @@ function StudentApp({ join }) {
       </header>
       <div className="viewhead">
         <h2>{stu.name}</h2>
-        <span className="lvl">{stu.level}{stu.grade ? ` · ${stu.grade} кл.` : ''}</span>
+        <span className="lvl">{stu.level}{ageLabel(stu) ? ` · ${ageLabel(stu)}` : ''}</span>
       </div>
       <div className="pcards">
         <section className="pcard">
