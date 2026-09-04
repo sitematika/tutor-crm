@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import SpotlightCard from './reactbits/SpotlightCard.jsx'
 import CountUp from './reactbits/CountUp.jsx'
 import FadeContent from './reactbits/FadeContent.jsx'
@@ -60,6 +60,23 @@ function nextLesson(s) {
   const { sl, delta } = best
   const when = delta === 0 ? 'сегодня' : delta === 1 ? 'завтра' : DAYS[sl.day]
   return `${when} в ${sl.start}`
+}
+
+/* ---------- API (сервер, когда рядом лежит api.php) ---------- */
+async function api(action, body) {
+  const r = await fetch('api.php?action=' + action, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    const e = new Error(j.error || 'api_error')
+    e.code = j.error
+    e.status = r.status
+    throw e
+  }
+  return j
 }
 
 /* ---------- storage (localStorage) ---------- */
@@ -138,7 +155,7 @@ function Modal({ title, onClose, children }) {
 /* ---------- student form ---------- */
 function StudentForm({ initial, onSave, onClose, onDelete }) {
   const [f, setF] = useState(() => initial || {
-    name: '', level: 'B1', grade: '', rate: 500, contact: '', notes: '', bookmark: '', balance: 0,
+    name: '', level: 'B1', grade: '', rate: 500, contact: '', notes: '', homework: '', bookmark: '', balance: 0,
     slots: [{ day: 0, start: '16:00', dur: 60 }],
     payments: [], colorIdx: 0, paidTick: false,
   })
@@ -213,7 +230,12 @@ function StudentForm({ initial, onSave, onClose, onDelete }) {
           </button>
         </div>
         <div className="field">
-          <label htmlFor="f-notes">Заметки</label>
+          <label htmlFor="f-homework">Домашнее задание</label>
+          <textarea id="f-homework" value={f.homework || ''} onChange={e => set('homework', e.target.value)}
+            placeholder="Что задано к следующему уроку — увидит ученик в своём кабинете" />
+        </div>
+        <div className="field">
+          <label htmlFor="f-notes">Заметки (видны только вам)</label>
           <textarea id="f-notes" value={f.notes} onChange={e => set('notes', e.target.value)} placeholder="Цели, слабые места…" />
         </div>
         <div className="mfoot">
@@ -361,7 +383,23 @@ function StudentsView({ students, onOpen, onAdd, onTick }) {
 }
 
 /* ---------- profile view ---------- */
-function ProfileView({ student: s, onBack, onEdit, onLessonDone, onPay, onTick, onRemoveExtra }) {
+function InviteLink({ join }) {
+  const [copied, setCopied] = useState(false)
+  const url = location.origin + location.pathname + '#join=' + join
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 2000) }
+    catch { prompt('Скопируйте ссылку:', url) }
+  }
+  return (
+    <div className="invite">
+      <input readOnly value={url} onFocus={e => e.target.select()} aria-label="Ссылка для ученика" />
+      <button className="btn sm" onClick={copy}>{copied ? 'Скопировано ✓' : 'Копировать'}</button>
+      <p className="hint">Отправьте ссылку ученику — по ней он создаст свой пароль и увидит домашку, расписание и статус оплаты. В админку по ней попасть нельзя.</p>
+    </div>
+  )
+}
+
+function ProfileView({ student: s, onBack, onEdit, onLessonDone, onPay, onTick, onRemoveExtra, serverMode, onMakeJoin }) {
   const payments = (s.payments || []).slice().reverse()
   const lessonsLeft = s.rate > 0 && s.balance > 0 ? Math.floor(s.balance / s.rate) : 0
   return (
@@ -409,8 +447,18 @@ function ProfileView({ student: s, onBack, onEdit, onLessonDone, onPay, onTick, 
                 ))}
             </>
           )}
+          <h4>Домашнее задание</h4>
+          <p className="notes-p" style={{ marginTop: 0 }}>{s.homework || '—'}</p>
           <h4>Где остановились</h4>
           <p style={{ margin: 0 }}>{s.bookmark || '—'}</p>
+          {serverMode && (
+            <>
+              <h4>Кабинет ученика</h4>
+              {s.join
+                ? <InviteLink join={s.join} />
+                : <button className="btn sm" onClick={onMakeJoin}>Создать ссылку-приглашение</button>}
+            </>
+          )}
           <h4>Контакты и заметки</h4>
           <dl className="kv">
             <dt>Контакт</dt><dd>{s.contact || '—'}</dd>
@@ -726,8 +774,8 @@ function useTheme() {
 }
 
 /* ---------- app ---------- */
-function Crm({ onLogout }) {
-  const [data, setData] = useState(loadData)
+function Crm({ mode, token, onLogout, onAuthFail }) {
+  const [data, setData] = useState(() => (mode === 'server' ? null : loadData()))
   const [tab, setTab] = useState('students')
   const [openId, setOpenId] = useState(null)
   const [editing, setEditing] = useState(null) // null | 'new' | studentId
@@ -736,10 +784,29 @@ function Crm({ onLogout }) {
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()))
   const { isDark, toggle } = useTheme()
 
-  useEffect(() => { persist(data) }, [data])
+  // серверный режим: загрузка при входе, сохранение с задержкой после изменений
+  const skipNextSave = useRef(true)
+  useEffect(() => {
+    if (mode !== 'server') return
+    api('get', { token })
+      .then(r => { skipNextSave.current = true; setData(r.data && typeof r.data === 'object' ? r.data : {}) })
+      .catch(e => { if (e.status === 401) onAuthFail() })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    if (data === null) return
+    if (mode !== 'server') { persist(data); return }
+    if (skipNextSave.current) { skipNextSave.current = false; return }
+    const t = setTimeout(() => {
+      api('save', { token, data }).catch(e => { if (e.status === 401) onAuthFail() })
+    }, 600)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data])
 
   const students = useMemo(() =>
-    Object.entries(data).map(([id, s]) => ({ ...s, id }))
+    Object.entries(data || {}).map(([id, s]) => ({ ...s, id }))
       .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru')),
     [data])
 
@@ -811,7 +878,13 @@ function Crm({ onLogout }) {
   const handleRemoveExtra = (s, i) =>
     save(s.id, { ...s, extra: (s.extra || []).filter((_, j) => j !== i) })
 
+  const handleMakeJoin = s => save(s.id, { ...s, join: uid() + uid() })
+
   const showTab = t => { setTab(t); setOpenId(null) }
+
+  if (data === null) {
+    return <div className="app"><p style={{ color: 'var(--muted)' }}>Загрузка…</p></div>
+  }
 
   return (
     <div className="app">
@@ -849,6 +922,8 @@ function Crm({ onLogout }) {
           onPay={() => setPayingId(open.id)}
           onTick={handleTick}
           onRemoveExtra={i => handleRemoveExtra(open, i)}
+          serverMode={mode === 'server'}
+          onMakeJoin={() => handleMakeJoin(open)}
         />
       )}
 
@@ -908,18 +983,269 @@ function Crm({ onLogout }) {
           onSave={handleLessonAdd} onClose={() => setAddingLesson(false)} />
       )}
 
-      <p className="storage-note">Данные хранятся в этом браузере.</p>
+      <p className="storage-note">
+        {mode === 'server'
+          ? 'Данные сохраняются на сервере — доступны с любого устройства.'
+          : 'Данные хранятся в этом браузере.'}
+      </p>
     </div>
   )
 }
 
+/* ---------- вход учителя (серверный режим) ---------- */
+const TOKEN_KEY = 'atc-token'
+
+function ServerAuthGate({ hasTeacher, onAuth }) {
+  const [p1, setP1] = useState('')
+  const [p2, setP2] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const submit = async e => {
+    e.preventDefault()
+    setErr('')
+    if (!hasTeacher) {
+      if (p1.length < 4) return setErr('Пароль слишком короткий — минимум 4 символа.')
+      if (p1 !== p2) return setErr('Пароли не совпадают.')
+    }
+    setBusy(true)
+    try {
+      const r = await api(hasTeacher ? 'login' : 'setup', { pass: p1 })
+      try { sessionStorage.setItem(TOKEN_KEY, r.token) } catch { /* приватный режим */ }
+      onAuth(r.token)
+    } catch (e2) {
+      setErr(e2.code === 'bad_password' ? 'Неверный пароль.' : 'Не получилось войти, попробуйте ещё раз.')
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="login-wrap">
+      <form className="login-card" onSubmit={submit}>
+        <span className="wordmark">A-teacher <em>CRM</em></span>
+        <h2>{hasTeacher ? 'Вход для учителя' : 'Установите пароль учителя'}</h2>
+        <p className="hint" style={{ margin: 0 }}>
+          {hasTeacher
+            ? 'Введите пароль, чтобы открыть кабинет.'
+            : 'Пароль хранится на сервере — вход будет работать с любого устройства.'}
+        </p>
+        <div className="field">
+          <label htmlFor="a-p1">Пароль</label>
+          <input id="a-p1" type="password" value={p1} autoFocus autoComplete={hasTeacher ? 'current-password' : 'new-password'}
+            onChange={e => { setP1(e.target.value); setErr('') }} />
+        </div>
+        {!hasTeacher && (
+          <div className="field">
+            <label htmlFor="a-p2">Пароль ещё раз</label>
+            <input id="a-p2" type="password" value={p2} autoComplete="new-password"
+              onChange={e => { setP2(e.target.value); setErr('') }} />
+          </div>
+        )}
+        {err && <p className="login-err">{err}</p>}
+        <button type="submit" className="btn primary" style={{ width: '100%' }} disabled={busy}>
+          {busy ? '…' : hasTeacher ? 'Войти' : 'Сохранить и войти'}
+        </button>
+      </form>
+    </div>
+  )
+}
+
+/* ---------- кабинет ученика ---------- */
+function StudentApp({ join }) {
+  const tokenKey = 'atc-stu-' + join
+  const [token, setToken] = useState(() => { try { return localStorage.getItem(tokenKey) } catch { return null } })
+  const [meta, setMeta] = useState(null)
+  const [stu, setStu] = useState(null)
+  const [p1, setP1] = useState('')
+  const [p2, setP2] = useState('')
+  const [err, setErr] = useState('')
+  const { isDark, toggle } = useTheme()
+
+  useEffect(() => {
+    if (!token) {
+      api('student_meta', { join }).then(setMeta).catch(() => setMeta({ error: true }))
+      return
+    }
+    api('student_get', { token })
+      .then(r => setStu(r.student))
+      .catch(() => {
+        try { localStorage.removeItem(tokenKey) } catch { /* приватный режим */ }
+        setStu(null)
+        setToken(null)
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token])
+
+  const submit = async e => {
+    e.preventDefault()
+    setErr('')
+    if (!meta.registered) {
+      if (p1.length < 4) return setErr('Пароль слишком короткий — минимум 4 символа.')
+      if (p1 !== p2) return setErr('Пароли не совпадают.')
+    }
+    try {
+      const r = await api(meta.registered ? 'student_login' : 'student_register', { join, pass: p1 })
+      try { localStorage.setItem(tokenKey, r.token) } catch { /* приватный режим */ }
+      setToken(r.token)
+    } catch (e2) {
+      setErr(e2.code === 'bad_password' ? 'Неверный пароль.'
+        : e2.code === 'already_registered' ? 'Пароль уже создан — войдите с ним.'
+        : 'Не получилось, попробуйте ещё раз.')
+    }
+  }
+
+  const logout = () => {
+    try { localStorage.removeItem(tokenKey) } catch { /* приватный режим */ }
+    setStu(null)
+    setToken(null)
+  }
+
+  if (!token) {
+    if (meta === null) return <div className="app"><p style={{ color: 'var(--muted)' }}>Загрузка…</p></div>
+    if (meta.error) return (
+      <div className="app"><div className="empty" style={{ marginTop: 48 }}>
+        <h3>Ссылка недействительна</h3>
+        <p>Попросите у преподавателя новую ссылку-приглашение.</p>
+      </div></div>
+    )
+    return (
+      <div className="login-wrap">
+        <form className="login-card" onSubmit={submit}>
+          <span className="wordmark">A-teacher <em>CRM</em></span>
+          <h2>{meta.registered ? 'Вход для ученика' : 'Привет, ' + meta.name + '!'}</h2>
+          <p className="hint" style={{ margin: 0 }}>
+            {meta.registered
+              ? 'Введите свой пароль, чтобы открыть кабинет.'
+              : 'Придумайте пароль — по этой же ссылке будете заходить в свой кабинет.'}
+          </p>
+          <div className="field">
+            <label htmlFor="s-p1">Пароль</label>
+            <input id="s-p1" type="password" value={p1} autoFocus
+              autoComplete={meta.registered ? 'current-password' : 'new-password'}
+              onChange={e => { setP1(e.target.value); setErr('') }} />
+          </div>
+          {!meta.registered && (
+            <div className="field">
+              <label htmlFor="s-p2">Пароль ещё раз</label>
+              <input id="s-p2" type="password" value={p2} autoComplete="new-password"
+                onChange={e => { setP2(e.target.value); setErr('') }} />
+            </div>
+          )}
+          {err && <p className="login-err">{err}</p>}
+          <button type="submit" className="btn primary" style={{ width: '100%' }}>
+            {meta.registered ? 'Войти' : 'Создать и войти'}
+          </button>
+        </form>
+      </div>
+    )
+  }
+
+  if (!stu) return <div className="app"><p style={{ color: 'var(--muted)' }}>Загрузка…</p></div>
+
+  const slots = (stu.slots || []).slice().sort((a, b) => a.day - b.day || toMin(a.start) - toMin(b.start))
+  const todayStr = iso(new Date())
+  const upcoming = (stu.extra || []).filter(ex => ex.date >= todayStr)
+    .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start))
+
+  return (
+    <div className="app portal">
+      <header className="top">
+        <span className="wordmark">A-teacher <em>CRM</em></span>
+        <span className="spacer" style={{ flex: 1 }} />
+        <button className="theme-btn" onClick={toggle} title="Переключить тему" aria-label="Переключить светлую/тёмную тему">
+          {isDark ? '☀️' : '🌙'}
+        </button>
+        <button className="btn sm" onClick={logout}>Выйти</button>
+      </header>
+      <div className="viewhead">
+        <h2>{stu.name}</h2>
+        <span className="lvl">{stu.level}{stu.grade ? ` · ${stu.grade} кл.` : ''}</span>
+      </div>
+      <div className="pcards">
+        <section className="pcard">
+          <h4>Домашнее задание</h4>
+          <p className="notes-p">{stu.homework || 'Пока ничего не задано 🎉'}</p>
+          {stu.bookmark && <p className="hint">📖 Остановились: {stu.bookmark}</p>}
+        </section>
+        <section className="pcard">
+          <h4>Расписание</h4>
+          {slots.length
+            ? slots.map((sl, i) => (
+                <div className="slot-line" key={i}>
+                  <span className="d">{DAYS[sl.day]}</span>
+                  <span>{sl.start}–{endTime(sl.start, sl.dur)}</span>
+                  {sl.type && <span className="lvl">{sl.type}</span>}
+                  <span className="t">{sl.dur} мин</span>
+                </div>
+              ))
+            : <p style={{ color: 'var(--muted)', margin: 0 }}>Расписание уточняется.</p>}
+          {upcoming.map((ex, i) => (
+            <div className="slot-line" key={'x' + i}>
+              <span className="d" style={{ width: 64 }}>{fmtDate(ex.date)}</span>
+              <span>{ex.start}–{endTime(ex.start, ex.dur)}</span>
+              {ex.type && <span className="lvl">{ex.type}</span>}
+              <span className="t">{ex.dur} мин</span>
+            </div>
+          ))}
+        </section>
+        <section className="pcard">
+          <h4>Оплата</h4>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <Pill student={stu} />
+            <span style={{ color: 'var(--muted)' }}>на счету {fmtMoney(stu.balance)}</span>
+          </div>
+        </section>
+      </div>
+    </div>
+  )
+}
+
+/* ---------- корень: сервер/локально, учитель/ученик ---------- */
 export default function App() {
-  const [authed, setAuthed] = useState(() => {
+  const join = useMemo(() => {
+    const m = location.hash.match(/join=([A-Za-z0-9]+)/)
+    return m ? m[1] : null
+  }, [])
+  const [boot, setBoot] = useState(null)
+  const [token, setToken] = useState(() => {
+    try { return sessionStorage.getItem(TOKEN_KEY) } catch { return null }
+  })
+  const [localAuthed, setLocalAuthed] = useState(() => {
     try { return sessionStorage.getItem(AUTH_KEY) === '1' } catch { return false }
   })
-  const logout = () => {
-    try { sessionStorage.removeItem(AUTH_KEY) } catch { /* приватный режим */ }
-    setAuthed(false)
+
+  useEffect(() => {
+    api('ping')
+      .then(p => setBoot({ server: true, hasTeacher: !!p.hasTeacher }))
+      .catch(() => setBoot({ server: false }))
+  }, [])
+
+  if (boot === null) return <div className="app"><p style={{ color: 'var(--muted)' }}>Загрузка…</p></div>
+
+  if (join) {
+    if (!boot.server) return (
+      <div className="app"><div className="empty" style={{ marginTop: 48 }}>
+        <h3>Кабинет ученика недоступен</h3>
+        <p>Эта копия сайта работает без сервера. Откройте ссылку, которую прислал преподаватель, целиком.</p>
+      </div></div>
+    )
+    return <StudentApp join={join} />
   }
-  return authed ? <Crm onLogout={logout} /> : <AuthGate onAuth={() => setAuthed(true)} />
+
+  if (boot.server) {
+    const authFail = () => {
+      try { sessionStorage.removeItem(TOKEN_KEY) } catch { /* приватный режим */ }
+      setToken(null)
+    }
+    if (!token) return <ServerAuthGate hasTeacher={boot.hasTeacher} onAuth={setToken} />
+    return <Crm mode="server" token={token} onLogout={() => { api('logout', { token }).catch(() => {}); authFail() }} onAuthFail={authFail} />
+  }
+
+  // локальный режим (без api.php): всё как раньше, в localStorage
+  const logoutLocal = () => {
+    try { sessionStorage.removeItem(AUTH_KEY) } catch { /* приватный режим */ }
+    setLocalAuthed(false)
+  }
+  return localAuthed
+    ? <Crm mode="local" onLogout={logoutLocal} />
+    : <AuthGate onAuth={() => setLocalAuthed(true)} />
 }

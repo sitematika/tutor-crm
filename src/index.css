@@ -293,5 +293,20 @@ table.pay td.mutedcell { color: var(--muted); }
 .login-card .field { margin-bottom: 0; }
 .login-err { color: var(--bad); font-size: 13px; margin: 0; }
 
+/* ---- ссылка-приглашение и кабинет ученика ---- */
+.invite { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.invite input {
+  flex: 1 1 220px; min-width: 0; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg); padding: 7px 10px; font-size: 12.5px; color: var(--muted);
+}
+.invite .hint { flex-basis: 100%; margin: 2px 0 0; }
+.portal { max-width: 620px; }
+.pcards { display: flex; flex-direction: column; gap: 14px; }
+.pcard {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: var(--shadow); padding: 16px 20px 18px;
+}
+.pcard h4 { margin: 0 0 10px; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+
 .storage-note { color: var(--muted); font-size: 12.5px; margin-top: 28px; text-align: center; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
