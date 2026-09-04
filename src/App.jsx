@@ -5,7 +5,7 @@ import FadeContent from './reactbits/FadeContent.jsx'
 
 /* ---------- constants ---------- */
 const DAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
-const LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
+const LEVELS = ['A0', 'A1', 'A1+', 'A2', 'A2+', 'B1', 'B1+', 'B2', 'B2+', 'C1', 'C1+', 'C2']
 const DURATIONS = [30, 45, 60, 90]
 const COLORS = ['#4E79A7', '#B3623F', '#5F9E6E', '#8B6BB1', '#C2903A', '#3E8F8F', '#B15B7D', '#7A8450']
 const STORAGE_KEY = 'tutor-crm-students-v2'
@@ -180,13 +180,12 @@ const IcoOut = () => (
   </svg>
 )
 
-/* Тип урока: обычный (пусто), пробный или уровень CEFR */
+/* Тип урока: обычный (пусто) или пробный */
 function TypeOptions() {
   return (
     <>
       <option value="">Обычный</option>
       <option value="Пробный">Пробный</option>
-      {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
     </>
   )
 }
@@ -608,7 +607,7 @@ function layoutLanes(items) {
   return sorted
 }
 
-function WeekView({ students, weekStart, onLessonClick, onAddLesson, onToggleMark }) {
+function WeekView({ students, weekStart, onLessonClick, onAddLesson, onToggleMark, onToggleDone }) {
   const dates = useMemo(() => DAYS.map((_, i) => addDays(weekStart, i)), [weekStart])
   const todayIso = iso(new Date())
 
@@ -691,15 +690,24 @@ function WeekView({ students, weekStart, onLessonClick, onAddLesson, onToggleMar
                       width: `calc(${100 / l.lanes}% - 6px)`,
                       '--stu': COLORS[l.student.colorIdx % COLORS.length],
                     }}>
-                    <b>{l.done ? '✓ ' : l.cancelled ? '✕ ' : ''}{l.student.name}</b>
+                    <b>{l.cancelled ? '✕ ' : ''}{l.student.name}</b>
                     <span>{l.start}–{endTime(l.start, l.dur)}{l.type ? ' · ' + l.type : ''}{l.once ? ' · разовый' : ''}</span>
-                    <button
-                      className={'ltick' + (l.paid ? ' on' : '')}
-                      title={l.paid ? 'Урок оплачен — снять отметку' : 'Отметить: урок оплачен'}
-                      aria-label={'Оплата урока: ' + (l.paid ? 'отмечена' : 'не отмечена')}
-                      aria-pressed={l.paid}
-                      onClick={e => { e.stopPropagation(); onToggleMark(l.student, l.key) }}
-                    >✓</button>
+                    <span className="lticks">
+                      <button
+                        className={'ltick blue' + (l.done ? ' on' : '')}
+                        title={l.done ? 'Урок проведён — снять (вернёт списание)' : 'Урок проведён (спишет ставку)'}
+                        aria-label={'Урок проведён: ' + (l.done ? 'да' : 'нет')}
+                        aria-pressed={l.done}
+                        onClick={e => { e.stopPropagation(); onToggleDone(l.student, l) }}
+                      >✓</button>
+                      <button
+                        className={'ltick green' + (l.paid ? ' on' : '')}
+                        title={l.paid ? 'Урок оплачен — снять (уберёт зачисление)' : 'Урок оплачен (+ставка на счёт)'}
+                        aria-label={'Урок оплачен: ' + (l.paid ? 'да' : 'нет')}
+                        aria-pressed={l.paid}
+                        onClick={e => { e.stopPropagation(); onToggleMark(l.student, l.key) }}
+                      >✓</button>
+                    </span>
                   </div>
                 ))}
               </div>
@@ -707,7 +715,10 @@ function WeekView({ students, weekStart, onLessonClick, onAddLesson, onToggleMar
           })}
         </div>
       </div>
-      <p className="weeknote">Клик по уроку — статус (проведён/отменён) и домашка; галочка в углу — «оплачено». Время показано местное — вашего устройства.</p>
+      <p className="weeknote">
+        Синяя галочка — урок проведён (списывает ставку), зелёная — урок оплачен (зачисляет на счёт).
+        Клик по уроку — отмена, домашка, прогресс. Время местное — вашего устройства.
+      </p>
     </>
   )
 }
@@ -753,11 +764,7 @@ function LessonDialog({ student: s, lesson, onSave, onOpenProfile, onToggleMark,
         </div>
         {status === 'done' && initialStatus !== 'done' && (
           <p className="hint">
-            {paid
-              ? 'Урок отмечен оплаченным — счёт не изменится.'
-              : s.paidTick
-                ? 'Стоит галочка «оплачен отдельно» — она снимется, счёт не изменится.'
-                : `Со счёта спишется ${fmtMoney(s.rate)}.`}
+            Со счёта спишется {fmtMoney(s.rate)}.{paid ? ' Урок оплачен — зачисление уже на счету, итог по нулям.' : ''}
           </p>
         )}
         {status === 'cancelled' && (
@@ -1063,8 +1070,6 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
       if (prevEntry.paidBy === 'tick') next.paidTick = true
       else if (prevEntry.paidBy !== 'mark') next.balance = (next.balance || 0) + (next.rate || 0)
     }
-    // авто-оплата «за урок» старой записи тоже убирается (вернётся ниже, если урок остаётся)
-    next.payments = (s.payments || []).filter(p => !(p.auto && p.lesson === lessonKey(lesson)))
 
     // домашка этого урока — отдельной записью со статусом «сделано/нет»
     const text = (hw || '').trim()
@@ -1081,15 +1086,8 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
       const willCharge = status === 'done' ? true : !!charge
       let paidBy
       if (willCharge) {
-        // урок с отметкой «оплачен» уже покрыт — счёт не трогаем,
-        // но оплата фиксируется в истории (и в сумме за месяц)
-        if ((s.marks || {})[lessonKey(lesson)]) {
-          paidBy = 'mark'
-          next.payments = [...next.payments, {
-            date: lesson.date, amount: next.rate || 0, lesson: lessonKey(lesson), auto: true,
-          }]
-        } else if (next.paidTick) { paidBy = 'tick'; next.paidTick = false }
-        else { paidBy = 'balance'; next.balance = (next.balance || 0) - (next.rate || 0) }
+        paidBy = 'balance'
+        next.balance = (next.balance || 0) - (next.rate || 0)
       }
       next.log = [...next.log, {
         date: lesson.date, start: lesson.start, dur: lesson.dur, type: lesson.type,
@@ -1129,11 +1127,46 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
     setAddingLesson(false)
   }
 
+  // зелёная галочка «урок оплачен»: +ставка на счёт и запись в историю оплат;
+  // снятие галочки убирает зачисление (только если оно было сделано этой галочкой)
   const handleToggleMark = (s, key) => {
     const marks = { ...(s.marks || {}) }
-    if (marks[key]) delete marks[key]
-    else marks[key] = true
-    save(s.id, { ...s, marks })
+    const next = { ...s, marks }
+    const rate = s.rate || 0
+    if (marks[key]) {
+      delete marks[key]
+      if ((s.payments || []).some(p => p.auto && p.lesson === key)) {
+        next.balance = (s.balance || 0) - rate
+        next.payments = (s.payments || []).filter(p => !(p.auto && p.lesson === key))
+      }
+    } else {
+      marks[key] = true
+      next.balance = (s.balance || 0) + rate
+      next.payments = [...(s.payments || []), { date: key.split('|')[0], amount: rate, lesson: key, auto: true }]
+    }
+    save(s.id, next)
+  }
+
+  // синяя галочка «урок проведён»: −ставка со счёта; повторное нажатие возвращает
+  const handleToggleDone = (s, lesson) => {
+    const isEntry = e => e.date === lesson.date && e.start === lesson.start
+    const entry = (s.log || []).find(isEntry)
+    const next = { ...s }
+    if (entry) {
+      if (entry.kind === 'cancelled') return // отменённый урок — через окно урока
+      next.log = (s.log || []).filter(e => !isEntry(e))
+      if (entry.charged !== false) {
+        if (entry.paidBy === 'tick') next.paidTick = true
+        else if (entry.paidBy !== 'mark') next.balance = (next.balance || 0) + (next.rate || 0)
+      }
+    } else {
+      next.balance = (next.balance || 0) - (next.rate || 0)
+      next.log = [...(s.log || []), {
+        date: lesson.date, start: lesson.start, dur: lesson.dur, type: lesson.type,
+        kind: 'done', charged: true, paidBy: 'balance',
+      }]
+    }
+    save(s.id, next)
   }
 
   const handleRemoveExtra = (s, i) =>
@@ -1218,7 +1251,8 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
             weekStart={weekStart}
             onLessonClick={l => setLessonDlg({ studentId: l.student.id, lesson: l })}
             onAddLesson={() => setAddingLesson(true)}
-            onToggleMark={handleToggleMark} />
+            onToggleMark={handleToggleMark}
+            onToggleDone={handleToggleDone} />
         </FadeContent>
       )}
 

@@ -220,21 +220,24 @@ nav.tabs button.on { background: var(--accent); color: var(--accent-ink); }
 }
 .lesson.isdone { opacity: 0.55; }
 .lesson.isdone b { text-decoration: line-through; text-decoration-thickness: 1px; }
-.lesson { padding-right: 26px; }
+.lesson { padding-right: 46px; }
 .lesson b { display: block; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lesson span { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 10.5px; }
 .lesson.trial {
   border-left-color: var(--warn);
   background: color-mix(in oklab, var(--warn) 14%, var(--surface));
 }
+.lticks { position: absolute; top: 3px; right: 3px; display: flex; gap: 3px; }
 .ltick {
-  position: absolute; top: 4px; right: 4px; width: 18px; height: 18px; padding: 0;
+  width: 18px; height: 18px; padding: 0;
   border-radius: 6px; border: 1.5px solid var(--line); background: var(--surface);
   color: transparent; font-size: 11px; line-height: 1; display: grid; place-items: center;
   transition: background 0.15s, border-color 0.15s;
 }
-.ltick:hover { border-color: var(--ok); }
-.ltick.on { background: var(--ok); border-color: var(--ok); color: #fff; }
+.ltick.blue:hover { border-color: #3B82F6; }
+.ltick.blue.on { background: #3B82F6; border-color: #3B82F6; color: #fff; }
+.ltick.green:hover { border-color: var(--ok); }
+.ltick.green.on { background: var(--ok); border-color: var(--ok); color: #fff; }
 .weeknote { color: var(--muted); font-size: 13px; margin-top: 10px; }
 .weeknav { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .weeknav input.weekpick {
