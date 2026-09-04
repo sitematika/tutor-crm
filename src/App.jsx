@@ -7,6 +7,7 @@ import FadeContent from './reactbits/FadeContent.jsx'
 const DAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 const LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
 const DURATIONS = [30, 45, 60, 90]
+const GRADES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 const COLORS = ['#4E79A7', '#B3623F', '#5F9E6E', '#8B6BB1', '#C2903A', '#3E8F8F', '#B15B7D', '#7A8450']
 const STORAGE_KEY = 'tutor-crm-students-v2'
 
@@ -137,7 +138,7 @@ function Modal({ title, onClose, children }) {
 /* ---------- student form ---------- */
 function StudentForm({ initial, onSave, onClose, onDelete }) {
   const [f, setF] = useState(() => initial || {
-    name: '', level: 'B1', rate: 500, contact: '', notes: '', bookmark: '', balance: 0,
+    name: '', level: 'B1', grade: '', rate: 500, contact: '', notes: '', bookmark: '', balance: 0,
     slots: [{ day: 0, start: '16:00', dur: 60 }],
     payments: [], colorIdx: 0, paidTick: false,
   })
@@ -162,6 +163,13 @@ function StudentForm({ initial, onSave, onClose, onDelete }) {
             <label htmlFor="f-level">Уровень (CEFR)</label>
             <select id="f-level" value={f.level} onChange={e => set('level', e.target.value)}>
               {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="f-grade">Класс школы</label>
+            <select id="f-grade" value={f.grade || ''} onChange={e => set('grade', e.target.value)}>
+              <option value="">— (взрослый)</option>
+              {GRADES.map(g => <option key={g} value={g}>{g} класс</option>)}
             </select>
           </div>
           <div className="field">
@@ -334,7 +342,7 @@ function StudentsView({ students, onOpen, onAdd, onTick }) {
                 <Ava student={s} />
                 <h3>{s.name}</h3>
                 <Tick student={s} onToggle={onTick} />
-                <span className="lvl">{s.level}</span>
+                <span className="lvl">{s.level}{s.grade ? ` · ${s.grade} кл.` : ''}</span>
               </div>
               <div className="meta">
                 <span>{next ? 'Следующий урок: ' + next : 'Расписание не задано'}</span>
@@ -362,7 +370,7 @@ function ProfileView({ student: s, onBack, onEdit, onLessonDone, onPay, onTick, 
         <Ava student={s} size={44} />
         <div>
           <h2>{s.name}</h2>
-          <span className="sub">Уровень {s.level} · {fmtMoney(s.rate)} / урок</span>
+          <span className="sub">Уровень {s.level}{s.grade ? ` · ${s.grade} класс` : ''} · {fmtMoney(s.rate)} / урок</span>
         </div>
         <div className="actions">
           <button className="btn" onClick={onBack}>← Ко всем</button>
@@ -593,7 +601,7 @@ function PaymentsView({ students, onOpen, onPay, onTick }) {
                   <td>
                     <span className="stu-cell">
                       <Ava student={s} size={28} />
-                      <span className="stu-name">{s.name}<small>{s.level} · {fmtMoney(s.rate)}/ур.</small></span>
+                      <span className="stu-name">{s.name}<small>{s.level}{s.grade ? ` · ${s.grade} кл.` : ''} · {fmtMoney(s.rate)}/ур.</small></span>
                     </span>
                   </td>
                   <td onClick={e => e.stopPropagation()}><Tick student={s} onToggle={onTick} /></td>
