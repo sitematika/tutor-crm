@@ -240,9 +240,9 @@ nav.tabs button.on { background: var(--accent); color: var(--accent-ink); }
 .ltick.green.on { background: var(--ok); border-color: var(--ok); color: #fff; }
 .weeknote { color: var(--muted); font-size: 13px; margin-top: 10px; }
 .weeknav { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.weeknav input.weekpick {
+.weeknav input.weekpick, .weeknav select.weekpick {
   border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
-  padding: 5px 8px; font-size: 13px; color: var(--ink);
+  padding: 5px 8px; font-size: 13px; color: var(--ink); max-width: 160px;
 }
 
 /* ---- payments ---- */
@@ -252,10 +252,20 @@ nav.tabs button.on { background: var(--accent); color: var(--accent-ink); }
   padding: 14px 18px 16px; box-shadow: var(--shadow);
   display: flex; flex-direction: column; gap: 6px;
 }
-.stat span { color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
-.stat b { font-size: 27px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.stat span { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; }
+.stat b { font-size: 36px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.05; letter-spacing: -0.02em; }
 .stat.alert b { color: var(--bad); }
 .stat.money b { color: var(--accent); }
+.charts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px; }
+.chartcard {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  padding: 14px 18px 10px; box-shadow: var(--shadow); min-width: 0;
+}
+.chartcard h4 { margin: 0 0 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+.chart { width: 100%; height: auto; display: block; }
+.chart .bar { fill: var(--accent); opacity: 0.9; }
+.chart .cval { fill: var(--ink); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.chart .clab { fill: var(--muted); font-size: 12px; }
 .table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
 table.pay { width: 100%; border-collapse: collapse; min-width: 760px; }
 table.pay th { text-align: left; font-size: 12px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); font-weight: 700; padding: 13px 16px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
@@ -377,11 +387,14 @@ table.pay td.mutedcell { color: var(--muted); }
   .viewhead > .btn.primary { flex: 1 1 100%; }
   .weeknav { width: 100%; justify-content: space-between; }
   .weeknav .btn { flex: 1; }
-  .weeknav input.weekpick { flex: 1 1 100%; min-height: 40px; }
+  .weeknav input.weekpick, .weeknav select.weekpick { flex: 1 1 45%; max-width: none; min-height: 40px; }
+  .lticks { flex-direction: column; gap: 2px; }
+  .lesson { padding-right: 26px; }
 
   .cards { grid-template-columns: 1fr; }
   .stats { grid-template-columns: 1fr 1fr; }
-  .stat b { font-size: 23px; }
+  .stat b { font-size: 28px; }
+  .charts { grid-template-columns: 1fr; }
 
   .profile .phead { padding: 16px 16px 14px; }
   .profile .phead .actions { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-left: 0; }

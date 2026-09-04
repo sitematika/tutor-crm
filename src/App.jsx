@@ -460,7 +460,6 @@ function StudentsView({ students, onOpen, onAdd, onTick }) {
               <div className="name-row">
                 <Ava student={s} />
                 <h3>{s.name}</h3>
-                <Tick student={s} onToggle={onTick} />
                 <span className="lvl">{s.level}{ageLabel(s) ? ` · ${ageLabel(s)}` : ''}</span>
               </div>
               <div className="meta">
@@ -897,6 +896,27 @@ function LessonDialog({ student: s, lesson, onSave, onOpenProfile, onToggleMark,
   )
 }
 
+/* ---------- график-столбики (SVG) ---------- */
+function BarChart({ data, money }) {
+  const max = Math.max(...data.map(d => d.value), 1)
+  const compact = v => (money && v >= 1000 ? Math.round(v / 100) / 10 + 'к' : String(v))
+  const w = data.length * 48
+  return (
+    <svg viewBox={`0 0 ${w} 150`} className="chart" role="img" preserveAspectRatio="xMidYMid meet">
+      {data.map((d, i) => {
+        const h = Math.max(3, Math.round((d.value / max) * 96))
+        return (
+          <g key={i} transform={`translate(${i * 48},0)`}>
+            <rect className="bar" x="9" y={122 - h} width="30" height={h} rx="6" />
+            <text className="cval" x="24" y={114 - h} textAnchor="middle">{d.value ? compact(d.value) : ''}</text>
+            <text className="clab" x="24" y="140" textAnchor="middle">{d.label}</text>
+          </g>
+        )
+      })}
+    </svg>
+  )
+}
+
 /* ---------- payments view ---------- */
 function PaymentsView({ students, onOpen, onPay, onTick }) {
   const waiting = students.filter(s => payStatus(s).k !== 'paid')
@@ -907,6 +927,25 @@ function PaymentsView({ students, onOpen, onPay, onTick }) {
       .reduce((a, p) => a + (p.amount || 0), 0), 0)
 
   const sorted = students.slice().sort((a, b) => (a.balance || 0) - (b.balance || 0))
+
+  // последние 6 месяцев: доход и проведённые уроки
+  const months = [...Array(6)].map((_, i) => {
+    const d = new Date()
+    d.setDate(1)
+    d.setMonth(d.getMonth() - 5 + i)
+    return { ym: iso(d).slice(0, 7), label: MONTHS[d.getMonth()] }
+  })
+  const incomeData = months.map(m => ({
+    label: m.label,
+    value: students.reduce((sum, s) =>
+      sum + (s.payments || []).filter(p => p.date && p.date.slice(0, 7) === m.ym)
+        .reduce((a, p) => a + (p.amount || 0), 0), 0),
+  }))
+  const lessonsData = months.map(m => ({
+    label: m.label,
+    value: students.reduce((n, s) =>
+      n + (s.log || []).filter(e => e.kind !== 'cancelled' && e.date && e.date.slice(0, 7) === m.ym).length, 0),
+  }))
 
   return (
     <>
@@ -928,11 +967,21 @@ function PaymentsView({ students, onOpen, onPay, onTick }) {
           <b><CountUp to={monthIncome} duration={1} separator=" " /> ₴</b>
         </div>
       </div>
+      <div className="charts">
+        <div className="chartcard">
+          <h4>Доход по месяцам, ₴</h4>
+          <BarChart data={incomeData} money />
+        </div>
+        <div className="chartcard">
+          <h4>Проведено уроков</h4>
+          <BarChart data={lessonsData} />
+        </div>
+      </div>
       <div className="table-wrap">
         <table className="pay">
           <thead>
             <tr>
-              <th>Ученик</th><th>Оплачен</th><th>Статус</th><th className="num">На счету</th>
+              <th>Ученик</th><th>Статус</th><th className="num">На счету</th>
               <th className="num">Ставка</th><th>Последняя оплата</th><th></th>
             </tr>
           </thead>
@@ -947,7 +996,6 @@ function PaymentsView({ students, onOpen, onPay, onTick }) {
                       <span className="stu-name">{s.name}<small>{s.level}{ageLabel(s) ? ` · ${ageLabel(s)}` : ''} · {fmtMoney(s.rate)}/ур.</small></span>
                     </span>
                   </td>
-                  <td onClick={e => e.stopPropagation()}><Tick student={s} onToggle={onTick} /></td>
                   <td><Pill student={s} /></td>
                   <td className="num strong">{fmtMoney(s.balance)}</td>
                   <td className="num">{fmtMoney(s.rate)}</td>
@@ -959,7 +1007,7 @@ function PaymentsView({ students, onOpen, onPay, onTick }) {
               )
             })}
             {!sorted.length && (
-              <tr><td colSpan="7" style={{ color: 'var(--muted)', textAlign: 'center', padding: 28 }}>
+              <tr><td colSpan="6" style={{ color: 'var(--muted)', textAlign: 'center', padding: 28 }}>
                 Добавьте учеников — статусы оплат появятся здесь.
               </td></tr>
             )}
@@ -1078,6 +1126,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
   const [addingLesson, setAddingLesson] = useState(false)
   const [lessonDlg, setLessonDlg] = useState(null) // { studentId, lesson }
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()))
+  const [weekFilter, setWeekFilter] = useState('') // '' = все ученики
   const { isDark, toggle } = useTheme()
 
   // серверный режим: загрузка при входе, сохранение с задержкой после изменений
@@ -1355,10 +1404,15 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
               <input type="date" className="weekpick" value={iso(weekStart)}
                 onChange={e => e.target.value && setWeekStart(mondayOf(new Date(e.target.value + 'T00:00')))}
                 aria-label="Выбрать неделю по календарю" />
+              <select className="weekpick" value={weekFilter} onChange={e => setWeekFilter(e.target.value)}
+                aria-label="Фильтр по ученику">
+                <option value="">Все ученики</option>
+                {students.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
             </div>
             {students.length > 0 && <button className="btn primary" onClick={() => setAddingLesson(true)}>+ Урок</button>}
           </div>
-          <WeekView students={students}
+          <WeekView students={weekFilter ? students.filter(s => s.id === weekFilter) : students}
             weekStart={weekStart}
             onLessonClick={l => setLessonDlg({ studentId: l.student.id, lesson: l })}
             onAddLesson={() => setAddingLesson(true)}
