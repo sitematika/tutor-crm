@@ -191,8 +191,8 @@ function Ava({ student, size = 30 }) {
 }
 
 /* Логотип: «A» с зелёной отметкой */
-const Logo = ({ size = 26 }) => (
-  <svg viewBox="0 0 64 64" width={size} height={size} aria-hidden="true" style={{ flex: 'none', borderRadius: size * 0.22 }}>
+const Logo = ({ size = 38 }) => (
+  <svg viewBox="0 0 64 64" width={size} height={size} aria-hidden="true" style={{ flex: 'none' }} className="logo">
     <rect width="64" height="64" rx="14" fill="#2563EB" />
     <path d="M16 44 28 16 40 44" stroke="#fff" strokeWidth="6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
     <path d="M21 34h14" stroke="#fff" strokeWidth="6" strokeLinecap="round" />
