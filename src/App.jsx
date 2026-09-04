@@ -39,8 +39,14 @@ const yearsWord = n => {
   if (b >= 2 && b <= 4) return 'года'
   return 'лет'
 }
-// возраст; для учеников, заведённых раньше с «классом школы», показываем класс
-const ageLabel = s => (s.age ? `${s.age} ${yearsWord(Number(s.age))}` : s.grade ? `${s.grade} кл.` : '')
+const GRADES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+// подпись «возраст · класс» — показываем то, что заполнено
+const ageLabel = s => {
+  const parts = []
+  if (s.age) parts.push(`${s.age} ${yearsWord(Number(s.age))}`)
+  if (s.grade) parts.push(`${s.grade} кл.`)
+  return parts.join(' · ')
+}
 const lessonKey = l => l.date + '|' + l.start
 
 /* Статус оплаты — от счёта И от уроков. Долг есть только если
@@ -216,7 +222,7 @@ function Modal({ title, onClose, children }) {
 /* ---------- student form ---------- */
 function StudentForm({ initial, onSave, onClose, onDelete }) {
   const [f, setF] = useState(() => initial || {
-    name: '', level: 'B1', age: '', rate: 500, contact: '', notes: '', bookmark: '', balance: 0,
+    name: '', level: 'B1', age: '', grade: '', rate: 500, contact: '', notes: '', bookmark: '', balance: 0,
     slots: [{ day: 0, start: '16:00', dur: 60 }],
     payments: [], colorIdx: 0, paidTick: false,
   })
@@ -247,6 +253,13 @@ function StudentForm({ initial, onSave, onClose, onDelete }) {
             <label htmlFor="f-age">Возраст</label>
             <input id="f-age" type="number" min="3" max="99" value={f.age || ''} placeholder="—"
               onChange={e => set('age', e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="f-grade">Класс школы</label>
+            <select id="f-grade" value={f.grade || ''} onChange={e => set('grade', e.target.value)}>
+              <option value="">— (не школьник)</option>
+              {GRADES.map(g => <option key={g} value={g}>{g} класс</option>)}
+            </select>
           </div>
           <div className="field">
             <label htmlFor="f-rate">Ставка, ₴ / урок</label>
