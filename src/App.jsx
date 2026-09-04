@@ -683,9 +683,10 @@ function layoutLanes(items) {
   return sorted
 }
 
-function WeekView({ students, weekStart, onLessonClick, onAddLesson, onToggleMark, onToggleDone }) {
-  const dates = useMemo(() => DAYS.map((_, i) => addDays(weekStart, i)), [weekStart])
+function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, onToggleDone }) {
   const todayIso = iso(new Date())
+  // на телефоне показываем только диапазон часов, где есть уроки
+  const compact = typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches
 
   const autoPaid = useMemo(() => {
     const m = new Map()
@@ -695,22 +696,23 @@ function WeekView({ students, weekStart, onLessonClick, onAddLesson, onToggleMar
 
   const lessons = useMemo(() => {
     const items = []
-    students.forEach(s => {
-      const moves = s.moves || {}
-      ;(s.slots || []).forEach(sl => {
-        const date = iso(dates[sl.day])
-        if (moves[date + '|' + sl.start]) return // перенесён — покажем на новом месте
-        items.push({ ...sl, date, startMin: toMin(sl.start), student: s })
-      })
-      ;(s.extra || []).forEach(ex => {
-        const di = dates.findIndex(d => iso(d) === ex.date)
-        if (di !== -1) items.push({ ...ex, day: di, startMin: toMin(ex.start), student: s, once: true })
-      })
-      Object.entries(moves).forEach(([orig, mv]) => {
-        const di = dates.findIndex(d => iso(d) === mv.date)
-        if (di !== -1) items.push({
-          day: di, date: mv.date, start: mv.start, dur: mv.dur || 60,
-          startMin: toMin(mv.start), student: s, moved: true, origKey: orig,
+    dates.forEach((d, di) => {
+      const dIso = iso(d)
+      const wd = (d.getDay() + 6) % 7
+      students.forEach(s => {
+        const moves = s.moves || {}
+        ;(s.slots || []).forEach(sl => {
+          if (sl.day !== wd || moves[dIso + '|' + sl.start]) return
+          items.push({ ...sl, day: di, date: dIso, startMin: toMin(sl.start), student: s })
+        })
+        ;(s.extra || []).forEach(ex => {
+          if (ex.date === dIso) items.push({ ...ex, day: di, startMin: toMin(ex.start), student: s, once: true })
+        })
+        Object.entries(moves).forEach(([orig, mv]) => {
+          if (mv.date === dIso) items.push({
+            day: di, date: dIso, start: mv.start, dur: mv.dur || 60,
+            startMin: toMin(mv.start), student: s, moved: true, origKey: orig,
+          })
         })
       })
     })
@@ -727,15 +729,24 @@ function WeekView({ students, weekStart, onLessonClick, onAddLesson, onToggleMar
     })
   }, [students, dates, autoPaid])
 
-  // диапазон фиксированный 7:00–21:00; расширяется, только если урок выходит за него
+  // десктоп: фиксированно 7:00–21:00 (расширяется при уроках вне);
+  // телефон: только диапазон, где есть уроки — блоки крупнее
   const [minH, maxH] = useMemo(() => {
+    if (compact && lessons.length) {
+      let lo = 24, hi = 0
+      for (const l of lessons) {
+        lo = Math.min(lo, Math.floor(l.startMin / 60))
+        hi = Math.max(hi, Math.ceil((l.startMin + l.dur) / 60))
+      }
+      return [Math.max(0, lo), Math.min(24, Math.max(hi, lo + 3))]
+    }
     let lo = DAY_START, hi = DAY_END
     for (const l of lessons) {
       lo = Math.min(lo, Math.floor(l.startMin / 60))
       hi = Math.max(hi, Math.ceil((l.startMin + l.dur) / 60))
     }
     return [Math.max(0, lo), Math.min(24, hi)]
-  }, [lessons])
+  }, [lessons, compact])
 
   const hours = []
   for (let h = minH; h <= maxH; h++) hours.push(h)
@@ -752,11 +763,14 @@ function WeekView({ students, weekStart, onLessonClick, onAddLesson, onToggleMar
   return (
     <>
       <div className="week-wrap">
-        <div className="week">
+        <div className="week" style={{
+          gridTemplateColumns: `48px repeat(${dates.length}, 1fr)`,
+          minWidth: dates.length === 1 ? 0 : undefined,
+        }}>
           <div className="wh" aria-hidden="true"></div>
-          {DAYS.map((d, i) => (
-            <div className={'wh' + (iso(dates[i]) === todayIso ? ' today' : '')} key={d}>
-              {d}<span className="dnum">{dates[i].getDate()}</span>
+          {dates.map((d, i) => (
+            <div className={'wh' + (iso(d) === todayIso ? ' today' : '')} key={i}>
+              {DAYS[(d.getDay() + 6) % 7]}<span className="dnum">{d.getDate()}</span>
             </div>
           ))}
           <div className="timecol" style={{ height: colH }}>
@@ -764,7 +778,7 @@ function WeekView({ students, weekStart, onLessonClick, onAddLesson, onToggleMar
               <span className="hr" key={h} style={{ top: (h - minH) * PX_PER_HOUR }}>{h}:00</span>
             ))}
           </div>
-          {DAYS.map((_, di) => {
+          {dates.map((_, di) => {
             const dayItems = layoutLanes(lessons.filter(l => l.day === di))
             return (
               <div className={'daycol' + (iso(dates[di]) === todayIso ? ' today' : '')} key={di} style={{ height: colH }}>
@@ -848,7 +862,7 @@ function LessonDialog({ student: s, lesson, onSave, onOpenProfile, onToggleMark,
   return (
     <Modal title={s.name} onClose={onClose}>
       <p className="hint" style={{ marginTop: -10 }}>
-        {DAYS[lesson.day]}, {fmtDate(lesson.date)} · {lesson.start}–{endTime(lesson.start, lesson.dur)} · {lesson.dur} мин
+        {DAYS[(new Date(lesson.date + 'T00:00').getDay() + 6) % 7]}, {fmtDate(lesson.date)} · {lesson.start}–{endTime(lesson.start, lesson.dur)} · {lesson.dur} мин
         {lesson.type ? ' · ' + lesson.type : ''} · местное время
       </p>
       <form onSubmit={submit}>
@@ -1159,6 +1173,23 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
   const [lessonDlg, setLessonDlg] = useState(null) // { studentId, lesson }
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()))
   const [weekFilter, setWeekFilter] = useState('') // '' = все ученики
+  // «День» по умолчанию на телефоне — одна широкая колонка с галочками
+  const [calScope, setCalScope] = useState(() =>
+    (typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches ? 'day' : 'week'))
+  const [dayDate, setDayDate] = useState(() => iso(new Date()))
+  const calDates = calScope === 'day'
+    ? [new Date(dayDate + 'T00:00')]
+    : DAYS.map((_, i) => addDays(weekStart, i))
+  const calShift = n => {
+    if (calScope === 'day') setDayDate(iso(addDays(new Date(dayDate + 'T00:00'), n)))
+    else setWeekStart(w => addDays(w, 7 * n))
+  }
+  const calToday = () => { setDayDate(iso(new Date())); setWeekStart(mondayOf(new Date())) }
+  const calPick = v => {
+    if (!v) return
+    setDayDate(v)
+    setWeekStart(mondayOf(new Date(v + 'T00:00')))
+  }
   const { isDark, toggle } = useTheme()
 
   // серверный режим: загрузка при входе, сохранение с задержкой после изменений
@@ -1287,6 +1318,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
         save(s.id, { ...s, extra: [...(s.extra || []), { date: f.date, start: f.start, dur: f.dur, type }] })
       }
       setWeekStart(mondayOf(new Date(f.date + 'T00:00')))
+      setDayDate(f.date)
     }
     setAddingLesson(false)
   }
@@ -1341,6 +1373,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
     }
     save(s.id, next)
     setWeekStart(mondayOf(new Date(date + 'T00:00')))
+    setDayDate(date)
     setLessonDlg(null)
   }
 
@@ -1418,18 +1451,24 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
       {tab === 'week' && (
         <FadeContent duration={400} threshold={0}>
           <div className="viewhead">
-            <h2>Расписание недели</h2>
+            <h2>Расписание</h2>
             <span className="sub">
-              {weekStart.getDate()} {MONTHS[weekStart.getMonth()]} — {addDays(weekStart, 6).getDate()} {MONTHS[addDays(weekStart, 6).getMonth()]} {addDays(weekStart, 6).getFullYear()}
+              {calScope === 'day'
+                ? `${DAYS[(calDates[0].getDay() + 6) % 7]}, ${calDates[0].getDate()} ${MONTHS[calDates[0].getMonth()]} ${calDates[0].getFullYear()}`
+                : `${weekStart.getDate()} ${MONTHS[weekStart.getMonth()]} — ${addDays(weekStart, 6).getDate()} ${MONTHS[addDays(weekStart, 6).getMonth()]} ${addDays(weekStart, 6).getFullYear()}`}
             </span>
             <span className="spacer" />
             <div className="weeknav">
-              <button className="btn sm" onClick={() => setWeekStart(w => addDays(w, -7))} aria-label="Предыдущая неделя">←</button>
-              <button className="btn sm" onClick={() => setWeekStart(mondayOf(new Date()))}>Сегодня</button>
-              <button className="btn sm" onClick={() => setWeekStart(w => addDays(w, 7))} aria-label="Следующая неделя">→</button>
-              <input type="date" className="weekpick" value={iso(weekStart)}
-                onChange={e => e.target.value && setWeekStart(mondayOf(new Date(e.target.value + 'T00:00')))}
-                aria-label="Выбрать неделю по календарю" />
+              <div className="seg scopeseg" role="radiogroup" aria-label="Режим календаря">
+                <button type="button" className={calScope === 'day' ? 'on' : ''} onClick={() => setCalScope('day')}>День</button>
+                <button type="button" className={calScope === 'week' ? 'on' : ''} onClick={() => setCalScope('week')}>Неделя</button>
+              </div>
+              <button className="btn sm" onClick={() => calShift(-1)} aria-label={calScope === 'day' ? 'Предыдущий день' : 'Предыдущая неделя'}>←</button>
+              <button className="btn sm" onClick={calToday}>Сегодня</button>
+              <button className="btn sm" onClick={() => calShift(1)} aria-label={calScope === 'day' ? 'Следующий день' : 'Следующая неделя'}>→</button>
+              <input type="date" className="weekpick" value={calScope === 'day' ? dayDate : iso(weekStart)}
+                onChange={e => calPick(e.target.value)}
+                aria-label="Выбрать дату по календарю" />
               <select className="weekpick" value={weekFilter} onChange={e => setWeekFilter(e.target.value)}
                 aria-label="Фильтр по ученику">
                 <option value="">Все ученики</option>
@@ -1439,7 +1478,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
             {students.length > 0 && <button className="btn primary" onClick={() => setAddingLesson(true)}>+ Урок</button>}
           </div>
           <WeekView students={weekFilter ? students.filter(s => s.id === weekFilter) : students}
-            weekStart={weekStart}
+            dates={calDates}
             onLessonClick={l => setLessonDlg({ studentId: l.student.id, lesson: l })}
             onAddLesson={() => setAddingLesson(true)}
             onToggleMark={handleToggleMark}
