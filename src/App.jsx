@@ -670,7 +670,7 @@ function AuthGate({ onAuth }) {
   return (
     <div className="login-wrap">
       <form className="login-card" onSubmit={submit}>
-        <span className="wordmark">Кабинет <em>репетитора</em></span>
+        <span className="wordmark">A-teacher <em>CRM</em></span>
         <h2>{hasPass ? 'Вход' : 'Установите пароль'}</h2>
         <p className="hint" style={{ margin: 0 }}>
           {hasPass
@@ -808,7 +808,7 @@ function Crm({ onLogout }) {
   return (
     <div className="app">
       <header className="top">
-        <span className="wordmark">Кабинет <em>репетитора</em></span>
+        <span className="wordmark">A-teacher <em>CRM</em></span>
         <nav className="tabs" aria-label="Разделы">
           <button className={tab === 'students' ? 'on' : ''} onClick={() => showTab('students')}>Ученики</button>
           <button className={tab === 'week' ? 'on' : ''} onClick={() => showTab('week')}>Неделя</button>

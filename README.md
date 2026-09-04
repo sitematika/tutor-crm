@@ -1,4 +1,4 @@
-# Кабинет репетитора
+# A-teacher CRM
 
 CRM для репетитора английского языка. Отдельный сайт на React + Vite с компонентами [React Bits](https://reactbits.dev).
 
