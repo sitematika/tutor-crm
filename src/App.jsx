@@ -6,7 +6,7 @@ import FadeContent from './reactbits/FadeContent.jsx'
 /* ---------- constants ---------- */
 const DAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 const LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
-const DURATIONS = [45, 60, 90]
+const DURATIONS = [30, 45, 60, 90]
 const COLORS = ['#4E79A7', '#B3623F', '#5F9E6E', '#8B6BB1', '#C2903A', '#3E8F8F', '#B15B7D', '#7A8450']
 const STORAGE_KEY = 'tutor-crm-students-v2'
 
@@ -61,52 +61,18 @@ function nextLesson(s) {
   return `${when} в ${sl.start}`
 }
 
-/* ---------- демо-данные при первом запуске ---------- */
-const DEMO = {
-  'demo-anya': {
-    name: 'Аня Соколова', level: 'B1', rate: 500, contact: '@anya_s, +380 67 000 11 22',
-    notes: 'Готовится к IELTS (цель 6.5). Слабое место — listening.',
-    bookmark: 'Headway Intermediate, стр. 34', balance: 2500, paidTick: false, colorIdx: 0, demo: true,
-    slots: [{ day: 0, start: '16:00', dur: 60 }, { day: 3, start: '16:00', dur: 60 }],
-    payments: [{ date: '2026-08-28', amount: 4000 }],
-  },
-  'demo-maksim': {
-    name: 'Максим Орлов', level: 'A2', rate: 400, contact: '+380 50 333 44 55 (мама — Ольга)',
-    notes: 'Школьник, 7 класс. Подтягиваем грамматику: Present Perfect vs Past Simple.',
-    bookmark: 'Solutions Elementary, стр. 58', balance: 0, paidTick: true, colorIdx: 1, demo: true,
-    slots: [{ day: 1, start: '18:00', dur: 60 }, { day: 4, start: '18:00', dur: 60 }],
-    payments: [{ date: '2026-08-05', amount: 3200 }],
-  },
-  'demo-irina': {
-    name: 'Ирина Ковалёва', level: 'C1', rate: 700, contact: '@irina_kv',
-    notes: 'Business English: презентации и переговоры.',
-    bookmark: 'Market Leader Advanced, Unit 5', balance: -1400, paidTick: false, colorIdx: 2, demo: true,
-    slots: [{ day: 2, start: '19:30', dur: 90 }],
-    payments: [{ date: '2026-07-20', amount: 2800 }],
-  },
-  'demo-timur': {
-    name: 'Тимур Ахмедов', level: 'B2', rate: 600, contact: '+380 63 777 88 99',
-    notes: 'Разговорная практика + подготовка к собеседованиям в IT.',
-    bookmark: 'English Grammar in Use, Unit 42', balance: 1800, paidTick: false, colorIdx: 3, demo: true,
-    slots: [{ day: 1, start: '16:30', dur: 45 }, { day: 5, start: '11:00', dur: 90 }],
-    payments: [{ date: '2026-09-01', amount: 2400 }],
-  },
-  'demo-liza': {
-    name: 'Лиза Мельникова', level: 'A1', rate: 350, contact: '@liza_mel',
-    notes: 'Начинающая, академические часы по 45 минут.',
-    bookmark: 'English File Beginner, стр. 21', balance: 2100, paidTick: false, colorIdx: 4, demo: true,
-    slots: [{ day: 0, start: '10:00', dur: 45 }, { day: 2, start: '10:00', dur: 45 }],
-    payments: [{ date: '2026-09-02', amount: 2800 }],
-  },
-}
-
 /* ---------- storage (localStorage) ---------- */
 function loadData() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) return JSON.parse(raw)
-  } catch { /* повреждённые данные — начинаем с демо */ }
-  return DEMO
+    if (raw) {
+      const d = JSON.parse(raw)
+      // тестовые ученики из ранних версий удаляются при загрузке
+      for (const k of Object.keys(d)) if (d[k] && d[k].demo) delete d[k]
+      return d
+    }
+  } catch { /* повреждённые данные — начинаем с пустого списка */ }
+  return {}
 }
 function persist(data) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)) } catch { /* нет места — работаем в памяти */ }
@@ -126,6 +92,17 @@ function Ava({ student, size = 30 }) {
       style={{ background: COLORS[student.colorIdx % COLORS.length], width: size, height: size, fontSize: Math.round(size * 0.37) }}>
       {initials(student.name)}
     </span>
+  )
+}
+
+/* Тип урока: обычный (пусто), пробный или уровень CEFR */
+function TypeOptions() {
+  return (
+    <>
+      <option value="">Обычный</option>
+      <option value="Пробный">Пробный</option>
+      {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+    </>
   )
 }
 
@@ -215,6 +192,9 @@ function StudentForm({ initial, onSave, onClose, onDelete }) {
               <select className="dur" value={s.dur} aria-label="Длительность" onChange={e => setSlot(i, 'dur', Number(e.target.value))}>
                 {DURATIONS.map(d => <option key={d} value={d}>{d} мин</option>)}
               </select>
+              <select className="ltype-sel" value={s.type || ''} aria-label="Тип урока" onChange={e => setSlot(i, 'type', e.target.value)}>
+                <TypeOptions />
+              </select>
               <button type="button" className="btn ghost sm" aria-label="Убрать слот"
                 onClick={() => setF(p => ({ ...p, slots: p.slots.filter((_, j) => j !== i) }))}>✕</button>
             </div>
@@ -270,7 +250,7 @@ function LessonForm({ students, defaultDate, onSave, onClose }) {
   const [f, setF] = useState({
     studentId: students[0]?.id || '',
     date: defaultDate || iso(new Date()),
-    start: '16:00', dur: 60, weekly: true,
+    start: '16:00', dur: 60, weekly: true, type: '',
   })
   const set = (k, v) => setF(p => ({ ...p, [k]: v }))
   const submit = e => {
@@ -301,6 +281,16 @@ function LessonForm({ students, defaultDate, onSave, onClose }) {
             <label htmlFor="l-dur">Длительность</label>
             <select id="l-dur" value={f.dur} onChange={e => set('dur', Number(e.target.value))}>
               {DURATIONS.map(d => <option key={d} value={d}>{d} мин</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="l-type">Тип урока</label>
+            <select id="l-type" value={f.type}
+              onChange={e => {
+                const v = e.target.value
+                setF(p => ({ ...p, type: v, weekly: v === 'Пробный' ? false : p.weekly }))
+              }}>
+              <TypeOptions />
             </select>
           </div>
         </div>
@@ -353,7 +343,6 @@ function StudentsView({ students, onOpen, onAdd, onTick }) {
               </div>
               <div className="foot">
                 <Pill student={s} />
-                {s.demo && <span className="demo-tag">пример</span>}
               </div>
             </div>
           </SpotlightCard>
@@ -390,6 +379,7 @@ function ProfileView({ student: s, onBack, onEdit, onLessonDone, onPay, onTick, 
                 <div className="slot-line" key={i}>
                   <span className="d">{DAYS[sl.day]}</span>
                   <span>{sl.start}–{endTime(sl.start, sl.dur)}</span>
+                  {sl.type && <span className="lvl">{sl.type}</span>}
                   <span className="t">{sl.dur} мин</span>
                 </div>
               ))
@@ -403,6 +393,7 @@ function ProfileView({ student: s, onBack, onEdit, onLessonDone, onPay, onTick, 
                   <div className="slot-line" key={ex.i}>
                     <span className="d" style={{ width: 64 }}>{fmtDate(ex.date)}</span>
                     <span>{ex.start}–{endTime(ex.start, ex.dur)}</span>
+                    {ex.type && <span className="lvl">{ex.type}</span>}
                     <span className="t">{ex.dur} мин</span>
                     <button className="btn ghost sm" aria-label="Удалить разовый урок"
                       onClick={() => onRemoveExtra(ex.i)}>✕</button>
@@ -429,9 +420,6 @@ function ProfileView({ student: s, onBack, onEdit, onLessonDone, onPay, onTick, 
             <Tick student={s} onToggle={onTick} />
             <span style={{ color: 'var(--muted)', fontSize: 13 }}>урок оплачен отдельно</span>
           </div>
-          <p className="hint">
-            «Урок проведён» снимает галочку, если она стоит, иначе списывает {fmtMoney(s.rate)} со счёта.
-          </p>
           <h4>История оплат</h4>
           {payments.length
             ? payments.map((p, i) => (
@@ -526,7 +514,7 @@ function WeekView({ students, weekStart, onOpen, onAddLesson, onToggleMark }) {
                   <div className="hline" key={h} style={{ top: (h - minH) * PX_PER_HOUR }} />
                 ))}
                 {dayItems.map(l => (
-                  <div className="lesson" key={l.key + l.student.id}
+                  <div className={'lesson' + (l.type === 'Пробный' ? ' trial' : '')} key={l.key + l.student.id}
                     role="button" tabIndex={0}
                     onClick={() => onOpen(l.student.id)}
                     onKeyDown={e => { if (e.key === 'Enter') onOpen(l.student.id) }}
@@ -538,7 +526,7 @@ function WeekView({ students, weekStart, onOpen, onAddLesson, onToggleMark }) {
                       '--stu': COLORS[l.student.colorIdx % COLORS.length],
                     }}>
                     <b>{l.student.name}</b>
-                    <span>{l.start}–{endTime(l.start, l.dur)}{l.once ? ' · разовый' : ''}</span>
+                    <span>{l.start}–{endTime(l.start, l.dur)}{l.type ? ' · ' + l.type : ''}{l.once ? ' · разовый' : ''}</span>
                     <button
                       className={'ltick' + (l.paid ? ' on' : '')}
                       title={l.paid ? 'Урок оплачен — снять отметку' : 'Отметить: урок оплачен'}
@@ -631,6 +619,88 @@ function PaymentsView({ students, onOpen, onPay, onTick }) {
   )
 }
 
+/* ---------- вход по паролю ---------- */
+const PASS_KEY = 'tutor-crm-pass'
+const AUTH_KEY = 'tutor-crm-auth'
+
+async function hashPass(text) {
+  try {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('')
+  } catch {
+    // crypto.subtle недоступен (http без localhost) — запасной хэш
+    let h = 5381
+    for (const c of text) h = ((h * 33) ^ c.charCodeAt(0)) >>> 0
+    return 'djb2-' + h.toString(16)
+  }
+}
+
+function AuthGate({ onAuth }) {
+  const [hasPass] = useState(() => { try { return !!localStorage.getItem(PASS_KEY) } catch { return false } })
+  const [p1, setP1] = useState('')
+  const [p2, setP2] = useState('')
+  const [err, setErr] = useState('')
+
+  const submit = async e => {
+    e.preventDefault()
+    if (!hasPass) {
+      if (p1.length < 4) return setErr('Пароль слишком короткий — минимум 4 символа.')
+      if (p1 !== p2) return setErr('Пароли не совпадают.')
+      try {
+        localStorage.setItem(PASS_KEY, await hashPass(p1))
+        sessionStorage.setItem(AUTH_KEY, '1')
+      } catch { /* приватный режим */ }
+      onAuth()
+    } else {
+      let stored = null
+      try { stored = localStorage.getItem(PASS_KEY) } catch { /* приватный режим */ }
+      if (await hashPass(p1) === stored) {
+        try { sessionStorage.setItem(AUTH_KEY, '1') } catch { /* приватный режим */ }
+        onAuth()
+      } else setErr('Неверный пароль.')
+    }
+  }
+
+  const reset = () => {
+    if (!confirm('Сбросить пароль? Данные учеников останутся, нужно будет задать новый пароль.')) return
+    try { localStorage.removeItem(PASS_KEY) } catch { /* приватный режим */ }
+    location.reload()
+  }
+
+  return (
+    <div className="login-wrap">
+      <form className="login-card" onSubmit={submit}>
+        <span className="wordmark">Кабинет <em>репетитора</em></span>
+        <h2>{hasPass ? 'Вход' : 'Установите пароль'}</h2>
+        <p className="hint" style={{ margin: 0 }}>
+          {hasPass
+            ? 'Введите пароль, чтобы открыть кабинет.'
+            : 'Пароль будет запрашиваться при каждом входе на этом устройстве.'}
+        </p>
+        <div className="field">
+          <label htmlFor="a-p1">Пароль</label>
+          <input id="a-p1" type="password" value={p1} autoFocus autoComplete={hasPass ? 'current-password' : 'new-password'}
+            onChange={e => { setP1(e.target.value); setErr('') }} />
+        </div>
+        {!hasPass && (
+          <div className="field">
+            <label htmlFor="a-p2">Пароль ещё раз</label>
+            <input id="a-p2" type="password" value={p2} autoComplete="new-password"
+              onChange={e => { setP2(e.target.value); setErr('') }} />
+          </div>
+        )}
+        {err && <p className="login-err">{err}</p>}
+        <button type="submit" className="btn primary" style={{ width: '100%' }}>
+          {hasPass ? 'Войти' : 'Сохранить и войти'}
+        </button>
+        {hasPass && (
+          <button type="button" className="btn ghost sm" onClick={reset}>Забыли пароль? Сбросить</button>
+        )}
+      </form>
+    </div>
+  )
+}
+
 /* ---------- theme toggle ---------- */
 function useTheme() {
   const [theme, setTheme] = useState(() => document.documentElement.dataset.theme || 'system')
@@ -648,7 +718,7 @@ function useTheme() {
 }
 
 /* ---------- app ---------- */
-export default function App() {
+function Crm({ onLogout }) {
   const [data, setData] = useState(loadData)
   const [tab, setTab] = useState('students')
   const [openId, setOpenId] = useState(null)
@@ -683,9 +753,7 @@ export default function App() {
       save(id, { ...form, colorIdx: colorIdx % COLORS.length, createdAt: new Date().toISOString() })
       setOpenId(id)
     } else {
-      const prev = byId(editing)
-      const { demo: _demo, ...rest } = { ...prev, ...form } // ручное сохранение снимает метку «пример»
-      save(editing, rest)
+      save(editing, { ...byId(editing), ...form })
     }
     setEditing(null)
   }
@@ -713,11 +781,12 @@ export default function App() {
   const handleLessonAdd = f => {
     const s = byId(f.studentId)
     if (s) {
+      const type = f.type || undefined
       if (f.weekly) {
         const day = (new Date(f.date + 'T00:00').getDay() + 6) % 7
-        save(s.id, { ...s, slots: [...(s.slots || []), { day, start: f.start, dur: f.dur }] })
+        save(s.id, { ...s, slots: [...(s.slots || []), { day, start: f.start, dur: f.dur, type }] })
       } else {
-        save(s.id, { ...s, extra: [...(s.extra || []), { date: f.date, start: f.start, dur: f.dur }] })
+        save(s.id, { ...s, extra: [...(s.extra || []), { date: f.date, start: f.start, dur: f.dur, type }] })
       }
       setWeekStart(mondayOf(new Date(f.date + 'T00:00')))
     }
@@ -748,6 +817,7 @@ export default function App() {
         <button className="theme-btn" onClick={toggle} title="Переключить тему" aria-label="Переключить светлую/тёмную тему">
           {isDark ? '☀️' : '🌙'}
         </button>
+        <button className="btn sm" onClick={onLogout}>Выйти</button>
       </header>
 
       {tab === 'students' && !open && (
@@ -830,7 +900,18 @@ export default function App() {
           onSave={handleLessonAdd} onClose={() => setAddingLesson(false)} />
       )}
 
-      <p className="storage-note">Данные хранятся в этом браузере. Ученики-примеры помечены «пример» — их можно удалить.</p>
+      <p className="storage-note">Данные хранятся в этом браузере.</p>
     </div>
   )
+}
+
+export default function App() {
+  const [authed, setAuthed] = useState(() => {
+    try { return sessionStorage.getItem(AUTH_KEY) === '1' } catch { return false }
+  })
+  const logout = () => {
+    try { sessionStorage.removeItem(AUTH_KEY) } catch { /* приватный режим */ }
+    setAuthed(false)
+  }
+  return authed ? <Crm onLogout={logout} /> : <AuthGate onAuth={() => setAuthed(true)} />
 }
