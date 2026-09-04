@@ -533,6 +533,7 @@ function ProfileView({ student: s, onBack, onEdit, onPay, onTick, onRemoveExtra,
                   {e.kind === 'cancelled' && (
                     <p className="loghw">Отменён · {e.charged !== false ? 'со списанием' : 'без списания'}</p>
                   )}
+                  {e.book && <p className="loghw">📖 Остановились: {e.book}</p>}
                   {e.hw && <p className="loghw">ДЗ: {e.hw}</p>}
                 </div>
               ))
@@ -673,13 +674,15 @@ function LessonDialog({ student: s, lesson, onSave, onOpenProfile, onToggleMark,
   // домашка, заданная именно на этом уроке (если окно открыли повторно)
   const ownHw = (s.homeworks || []).find(h => h.date === lesson.date)
   const [hw, setHw] = useState(ownHw ? ownHw.text : '')
+  // прогресс: где остановились на этом уроке (заранее подставляем текущую закладку)
+  const [bm, setBm] = useState(prevEntry && prevEntry.book != null ? prevEntry.book : s.bookmark || '')
   // последняя домашка с прошлых уроков — проверить «сделано»
   const prevHw = (s.homeworks || []).filter(h => h.date !== lesson.date).slice(-1)[0]
   const paid = !!((s.marks || {})[lesson.key])
 
   const submit = e => {
     e.preventDefault()
-    onSave({ lesson, status, prevEntry, hw, charge })
+    onSave({ lesson, status, prevEntry, hw, charge, bm })
   }
 
   return (
@@ -730,6 +733,11 @@ function LessonDialog({ student: s, lesson, onSave, onOpenProfile, onToggleMark,
           </div>
         )}
         <div className="field" style={{ marginTop: 10 }}>
+          <label htmlFor="ld-bm">Где остановились</label>
+          <input id="ld-bm" value={bm} onChange={e => setBm(e.target.value)}
+            placeholder="Учебник, страница или юнит…" />
+        </div>
+        <div className="field">
           <label htmlFor="ld-hw">Домашнее задание на следующий урок</label>
           <textarea id="ld-hw" value={hw} onChange={e => setHw(e.target.value)}
             placeholder="Ученик увидит это в своём кабинете" />
@@ -990,10 +998,10 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
   const handleTick = s => save(s.id, { ...s, paidTick: !s.paidTick })
 
   // сохранение из окна урока: статус (проведён/отменён, правило 24 ч) + домашка
-  const handleLessonDialogSave = ({ lesson, status, prevEntry, hw, charge }) => {
+  const handleLessonDialogSave = ({ lesson, status, prevEntry, hw, charge, bm }) => {
     const s = byId(lessonDlg.studentId)
     if (!s) { setLessonDlg(null); return }
-    const next = { ...s }
+    const next = { ...s, bookmark: (bm || '').trim() }
     const isEntry = e => e.date === lesson.date && e.start === lesson.start
 
     // старая запись убирается, её списание (если было) возвращается
@@ -1025,6 +1033,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
       next.log = [...next.log, {
         date: lesson.date, start: lesson.start, dur: lesson.dur, type: lesson.type,
         kind: status, charged: willCharge, paidBy, hw: text || undefined,
+        book: (bm || '').trim() || undefined,
       }]
     }
 
