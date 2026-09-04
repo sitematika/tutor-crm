@@ -49,6 +49,18 @@ const ageLabel = s => {
 }
 const lessonKey = l => l.date + '|' + l.start
 
+/* Бухгалтерия: баланс не хранится как «плюс-минус», а всегда пересчитывается
+   из записей — база (adjust) + все оплаты − все списания за уроки. Любая
+   галочка добавляет/убирает запись, значения сходятся из реального статуса. */
+const sumPayments = s => (s.payments || []).reduce((a, p) => a + (p.amount || 0), 0)
+const sumCharges = s => (s.log || [])
+  .filter(e => e.charged !== false && (e.paidBy === 'balance' || e.paidBy == null))
+  .reduce((a, e) => a + (e.amount != null ? e.amount : (s.rate || 0)), 0)
+const withLedger = s => {
+  const adjust = s.adjust != null ? s.adjust : (s.balance || 0) - sumPayments(s) + sumCharges(s)
+  return { ...s, adjust, balance: adjust + sumPayments(s) - sumCharges(s) }
+}
+
 /* Будущие уроки, покрытые предоплатой на счету: первые floor(баланс/ставка)
    предстоящих занятий (без проведённых/отменённых и оплаченных вручную) */
 function autoPaidKeys(s) {
@@ -92,7 +104,10 @@ function autoPaidKeys(s) {
 function payStatus(s) {
   const b = s.balance || 0
   const rate = s.rate || 0
-  if (b < 0) return { k: 'debt', label: 'Долг ' + fmtMoney(-b) }
+  if (b < 0) {
+    const cnt = rate > 0 ? Math.ceil(-b / rate) : 0
+    return { k: 'debt', label: 'Долг ' + fmtMoney(-b) + (cnt ? ` · ${cnt} ур.` : '') }
+  }
   if (rate > 0 && b >= rate) return { k: 'paid', label: `Наперёд · ${Math.floor(b / rate)} ур.` }
   const next = nextLessonInfo(s)
   const nextPaid = next && (s.marks || {})[next.date + '|' + next.sl.start]
@@ -174,6 +189,17 @@ function Ava({ student, size = 30 }) {
     </span>
   )
 }
+
+/* Логотип: «A» с зелёной отметкой */
+const Logo = ({ size = 26 }) => (
+  <svg viewBox="0 0 64 64" width={size} height={size} aria-hidden="true" style={{ flex: 'none', borderRadius: size * 0.22 }}>
+    <rect width="64" height="64" rx="14" fill="#2563EB" />
+    <path d="M16 44 28 16 40 44" stroke="#fff" strokeWidth="6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M21 34h14" stroke="#fff" strokeWidth="6" strokeLinecap="round" />
+    <circle cx="47" cy="47" r="12" fill="#16A34A" />
+    <path d="M42 47l4 4 8-8" stroke="#fff" strokeWidth="4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+)
 
 /* Иконки нижней навигации (мобильная версия) */
 const IcoUsers = () => (
@@ -874,10 +900,10 @@ function LessonDialog({ student: s, lesson, onSave, onOpenProfile, onToggleMark,
           <textarea id="ld-hw" value={hw} onChange={e => setHw(e.target.value)}
             placeholder="Ученик увидит это в своём кабинете" />
         </div>
-        <label className="check-line">
-          <input type="checkbox" checked={paid} onChange={() => onToggleMark(s, lesson.key)} />
-          <span>Этот урок оплачен</span>
-        </label>
+        <button type="button" className={'paybtn' + (paid ? ' on' : '')}
+          onClick={() => onToggleMark(s, lesson.key)}>
+          {paid ? '✓ Урок оплачен · +' + fmtMoney(s.rate) + ' на счету' : 'Отметить: урок оплачен (+' + fmtMoney(s.rate) + ')'}
+        </button>
         {lesson.autoPaid && !paid && <p className="hint">Покрыт предоплатой с баланса — спишется при проведении.</p>}
         <div className="field" style={{ marginTop: 10 }}>
           <label>Перенос урока (только эта дата, расписание не меняется)</label>
@@ -1075,7 +1101,7 @@ function AuthGate({ onAuth }) {
   return (
     <div className="login-wrap">
       <form className="login-card" onSubmit={submit}>
-        <span className="wordmark">A-teacher <em>CRM</em></span>
+        <span className="wordmark"><Logo /> A-teacher <em>CRM</em></span>
         <h2>{hasPass ? 'Вход' : 'Установите пароль'}</h2>
         <p className="hint" style={{ margin: 0 }}>
           {hasPass
@@ -1157,7 +1183,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
   }, [data])
 
   const students = useMemo(() =>
-    Object.entries(data || {}).map(([id, s]) => ({ ...s, id }))
+    Object.entries(data || {}).map(([id, s]) => ({ ...withLedger(s), id }))
       .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru')),
     [data])
 
@@ -1171,15 +1197,22 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
   }, [])
 
   const handleFormSave = form => {
+    // «На счету» из формы задаёт базу: adjust подбирается так, чтобы
+    // пересчёт (база + оплаты − списания) дал ровно введённую сумму
+    const applyBase = merged => {
+      const withAdjust = { ...merged, adjust: 0 }
+      withAdjust.adjust = (Number(form.balance) || 0) - sumPayments(withAdjust) + sumCharges(withAdjust)
+      return withLedger(withAdjust)
+    }
     if (editing === 'new') {
       const id = uid()
       const used = students.map(s => s.colorIdx % COLORS.length)
       let colorIdx = 0
       while (used.includes(colorIdx) && colorIdx < COLORS.length) colorIdx++
-      save(id, { ...form, colorIdx: colorIdx % COLORS.length, createdAt: new Date().toISOString() })
+      save(id, applyBase({ ...form, colorIdx: colorIdx % COLORS.length, createdAt: new Date().toISOString() }))
       setOpenId(id)
     } else {
-      save(editing, { ...byId(editing), ...form })
+      save(editing, applyBase({ ...byId(editing), ...form }))
     }
     setEditing(null)
   }
@@ -1200,12 +1233,9 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
     const next = { ...s, bookmark: (bm || '').trim() }
     const isEntry = e => e.date === lesson.date && e.start === lesson.start
 
-    // старая запись убирается, её списание (если было) возвращается
+    // старая запись убирается — её списание уйдёт из пересчёта само
     next.log = (s.log || []).filter(e => !isEntry(e))
-    if (prevEntry && prevEntry.charged !== false) {
-      if (prevEntry.paidBy === 'tick') next.paidTick = true
-      else if (prevEntry.paidBy !== 'mark') next.balance = (next.balance || 0) + (next.rate || 0)
-    }
+    if (prevEntry && prevEntry.charged !== false && prevEntry.paidBy === 'tick') next.paidTick = true
 
     // домашка этого урока — отдельной записью со статусом «сделано/нет»
     const text = (hw || '').trim()
@@ -1220,19 +1250,17 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
     // новая запись: проведён — всегда со списанием; отменён — по галочке
     if (status !== 'none') {
       const willCharge = status === 'done' ? true : !!charge
-      let paidBy
-      if (willCharge) {
-        paidBy = 'balance'
-        next.balance = (next.balance || 0) - (next.rate || 0)
-      }
       next.log = [...next.log, {
         date: lesson.date, start: lesson.start, dur: lesson.dur, type: lesson.type,
-        kind: status, charged: willCharge, paidBy, hw: text || undefined,
+        kind: status, charged: willCharge,
+        paidBy: willCharge ? 'balance' : undefined,
+        amount: willCharge ? (next.rate || 0) : undefined,
+        hw: text || undefined,
         book: (bm || '').trim() || undefined,
       }]
     }
 
-    save(s.id, next)
+    save(s.id, withLedger(next))
     setLessonDlg(null)
   }
 
@@ -1244,7 +1272,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
 
   const handlePaySave = p => {
     const s = paying
-    save(s.id, { ...s, balance: (s.balance || 0) + p.amount, payments: [...(s.payments || []), p] })
+    save(s.id, withLedger({ ...s, payments: [...(s.payments || []), p] }))
     setPayingId(null)
   }
 
@@ -1271,16 +1299,12 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
     const rate = s.rate || 0
     if (marks[key]) {
       delete marks[key]
-      if ((s.payments || []).some(p => p.auto && p.lesson === key)) {
-        next.balance = (s.balance || 0) - rate
-        next.payments = (s.payments || []).filter(p => !(p.auto && p.lesson === key))
-      }
+      next.payments = (s.payments || []).filter(p => !(p.auto && p.lesson === key))
     } else {
       marks[key] = true
-      next.balance = (s.balance || 0) + rate
       next.payments = [...(s.payments || []), { date: key.split('|')[0], amount: rate, lesson: key, auto: true }]
     }
-    save(s.id, next)
+    save(s.id, withLedger(next))
   }
 
   // синяя галочка «урок проведён»: −ставка со счёта; повторное нажатие возвращает
@@ -1291,18 +1315,14 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
     if (entry) {
       if (entry.kind === 'cancelled') return // отменённый урок — через окно урока
       next.log = (s.log || []).filter(e => !isEntry(e))
-      if (entry.charged !== false) {
-        if (entry.paidBy === 'tick') next.paidTick = true
-        else if (entry.paidBy !== 'mark') next.balance = (next.balance || 0) + (next.rate || 0)
-      }
+      if (entry.charged !== false && entry.paidBy === 'tick') next.paidTick = true
     } else {
-      next.balance = (next.balance || 0) - (next.rate || 0)
       next.log = [...(s.log || []), {
         date: lesson.date, start: lesson.start, dur: lesson.dur, type: lesson.type,
-        kind: 'done', charged: true, paidBy: 'balance',
+        kind: 'done', charged: true, paidBy: 'balance', amount: next.rate || 0,
       }]
     }
-    save(s.id, next)
+    save(s.id, withLedger(next))
   }
 
   const handleRemoveExtra = (s, i) =>
@@ -1348,7 +1368,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
   return (
     <div className="app">
       <header className="top">
-        <span className="wordmark">A-teacher <em>CRM</em></span>
+        <span className="wordmark"><Logo /> A-teacher <em>CRM</em></span>
         <nav className="tabs" aria-label="Разделы">
           <button className={tab === 'students' ? 'on' : ''} onClick={() => showTab('students')}>Ученики</button>
           <button className={tab === 'week' ? 'on' : ''} onClick={() => showTab('week')}>Неделя</button>
@@ -1521,7 +1541,7 @@ function ServerAuthGate({ hasTeacher, onAuth }) {
   return (
     <div className="login-wrap">
       <form className="login-card" onSubmit={submit}>
-        <span className="wordmark">A-teacher <em>CRM</em></span>
+        <span className="wordmark"><Logo /> A-teacher <em>CRM</em></span>
         <h2>{hasTeacher ? 'Вход для учителя' : 'Установите пароль учителя'}</h2>
         <p className="hint" style={{ margin: 0 }}>
           {hasTeacher
@@ -1610,7 +1630,7 @@ function StudentApp({ join }) {
     return (
       <div className="login-wrap">
         <form className="login-card" onSubmit={submit}>
-          <span className="wordmark">A-teacher <em>CRM</em></span>
+          <span className="wordmark"><Logo /> A-teacher <em>CRM</em></span>
           <h2>{meta.registered ? 'Вход для ученика' : 'Привет, ' + meta.name + '!'}</h2>
           <p className="hint" style={{ margin: 0 }}>
             {meta.registered
@@ -1649,7 +1669,7 @@ function StudentApp({ join }) {
   return (
     <div className="app portal">
       <header className="top">
-        <span className="wordmark">A-teacher <em>CRM</em></span>
+        <span className="wordmark"><Logo /> A-teacher <em>CRM</em></span>
         <span className="spacer" style={{ flex: 1 }} />
         <div className="hdr-actions">
           <button className="theme-btn" onClick={() => location.reload()} title="Обновить данные" aria-label="Обновить страницу и данные">

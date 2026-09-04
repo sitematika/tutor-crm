@@ -82,7 +82,7 @@ header.top {
   display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
   padding: 6px 0 18px; border-bottom: 1px solid var(--line); margin-bottom: 24px;
 }
-.wordmark { font-weight: 800; font-size: 20px; letter-spacing: -0.01em; }
+.wordmark { font-weight: 800; font-size: 20px; letter-spacing: -0.01em; display: inline-flex; align-items: center; gap: 9px; }
 .wordmark em { font-style: normal; color: var(--accent); }
 nav.tabs { display: flex; gap: 4px; margin-left: auto; }
 nav.tabs button {
@@ -253,7 +253,7 @@ nav.tabs button.on { background: var(--accent); color: var(--accent-ink); }
   display: flex; flex-direction: column; gap: 6px;
 }
 .stat span { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; }
-.stat b { font-size: 36px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.05; letter-spacing: -0.02em; }
+.stat b { font-size: 40px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.05; letter-spacing: -0.02em; }
 .stat.alert b { color: var(--bad); }
 .stat.money b { color: var(--accent); }
 .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px; }
@@ -304,6 +304,12 @@ table.pay td.mutedcell { color: var(--muted); }
 .slot-edit select.ltype-sel { width: 104px; }
 .modal .mfoot { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
 .modal .mfoot .left { margin-right: auto; }
+.paybtn {
+  width: 100%; min-height: 44px; border-radius: 10px; margin: 6px 0 2px;
+  border: 1.5px solid var(--line); background: var(--surface); font-weight: 700;
+}
+.paybtn:hover { border-color: var(--ok); }
+.paybtn.on { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); }
 .check-line { display: flex; align-items: center; gap: 8px; font-weight: 600; margin: 4px 0 8px; cursor: pointer; }
 .check-line input { accent-color: var(--accent); width: 16px; height: 16px; }
 .seg { display: flex; gap: 6px; }
@@ -393,8 +399,11 @@ table.pay td.mutedcell { color: var(--muted); }
 
   .cards { grid-template-columns: 1fr; }
   .stats { grid-template-columns: 1fr 1fr; }
-  .stat b { font-size: 28px; }
+  .stat b { font-size: 30px; }
   .charts { grid-template-columns: 1fr; }
+  /* на телефоне галочки на уроках мелкие — вместо них крупные кнопки в окне урока */
+  .lticks { display: none; }
+  .lesson { padding-right: 8px; }
 
   .profile .phead { padding: 16px 16px 14px; }
   .profile .phead .actions { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-left: 0; }
