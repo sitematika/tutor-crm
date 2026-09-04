@@ -49,6 +49,37 @@ const ageLabel = s => {
 }
 const lessonKey = l => l.date + '|' + l.start
 
+/* Будущие уроки, покрытые предоплатой на счету: первые floor(баланс/ставка)
+   предстоящих занятий (без проведённых/отменённых и оплаченных вручную) */
+function autoPaidKeys(s) {
+  const rate = s.rate || 0
+  let n = rate > 0 ? Math.floor((s.balance || 0) / rate) : 0
+  const keys = new Set()
+  if (n <= 0) return keys
+  const logged = new Set((s.log || []).map(e => e.date + '|' + e.start))
+  const moves = s.moves || {}
+  const occ = []
+  for (let d = 0; d < 56; d++) {
+    const day = addDays(new Date(), d)
+    const dIso = iso(day)
+    const wd = (day.getDay() + 6) % 7
+    for (const sl of (s.slots || [])) {
+      if (sl.day === wd && !moves[dIso + '|' + sl.start]) occ.push({ date: dIso, start: sl.start })
+    }
+    for (const ex of (s.extra || [])) if (ex.date === dIso) occ.push({ date: dIso, start: ex.start })
+  }
+  for (const mv of Object.values(moves)) if (mv.date >= iso(new Date())) occ.push({ date: mv.date, start: mv.start })
+  occ.sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start))
+  for (const o of occ) {
+    if (n <= 0) break
+    const key = o.date + '|' + o.start
+    if (logged.has(key) || (s.marks || {})[key]) continue
+    keys.add(key)
+    n--
+  }
+  return keys
+}
+
 /* Статус оплаты — от счёта И от уроков. Долг есть только если
    проведённый урок не оплачен (счёт ушёл в минус); будущие уроки
    долгом не считаются — при нуле без долга ученик «рассчитан». */
@@ -465,7 +496,7 @@ function InviteLink({ join }) {
   )
 }
 
-function ProfileView({ student: s, onBack, onEdit, onPay, onTick, onRemoveExtra, serverMode, onMakeJoin, onToggleHw, onDeleteHw }) {
+function ProfileView({ student: s, onBack, onEdit, onPay, onTick, onRemoveExtra, onRemoveMove, serverMode, onMakeJoin, onToggleHw, onDeleteHw }) {
   const payments = (s.payments || []).slice().reverse()
   const lessonsLeft = s.rate > 0 && s.balance > 0 ? Math.floor(s.balance / s.rate) : 0
   return (
@@ -495,6 +526,20 @@ function ProfileView({ student: s, onBack, onEdit, onPay, onTick, onRemoveExtra,
                 </div>
               ))
             : <p style={{ color: 'var(--muted)', margin: 0 }}>Слоты не заданы — добавьте в редактировании.</p>}
+          {Object.keys(s.moves || {}).length > 0 && (
+            <>
+              <h4>Переносы</h4>
+              {Object.entries(s.moves).sort((a, b) => a[1].date.localeCompare(b[1].date)).map(([orig, mv]) => (
+                <div className="slot-line" key={orig}>
+                  <span className="d" style={{ width: 64 }}>{fmtDate(mv.date)}</span>
+                  <span>{mv.start}–{endTime(mv.start, mv.dur || 60)}</span>
+                  <span className="t">вместо {fmtDate(orig.split('|')[0])} {orig.split('|')[1]}</span>
+                  <button className="btn ghost sm" aria-label="Отменить перенос"
+                    onClick={() => onRemoveMove(orig)}>✕</button>
+                </div>
+              ))}
+            </>
+          )}
           {(s.extra || []).length > 0 && (
             <>
               <h4>Разовые уроки</h4>
@@ -611,28 +656,45 @@ function WeekView({ students, weekStart, onLessonClick, onAddLesson, onToggleMar
   const dates = useMemo(() => DAYS.map((_, i) => addDays(weekStart, i)), [weekStart])
   const todayIso = iso(new Date())
 
+  const autoPaid = useMemo(() => {
+    const m = new Map()
+    students.forEach(s => m.set(s.id, autoPaidKeys(s)))
+    return m
+  }, [students])
+
   const lessons = useMemo(() => {
     const items = []
     students.forEach(s => {
+      const moves = s.moves || {}
       ;(s.slots || []).forEach(sl => {
-        items.push({ ...sl, date: iso(dates[sl.day]), startMin: toMin(sl.start), student: s })
+        const date = iso(dates[sl.day])
+        if (moves[date + '|' + sl.start]) return // перенесён — покажем на новом месте
+        items.push({ ...sl, date, startMin: toMin(sl.start), student: s })
       })
       ;(s.extra || []).forEach(ex => {
         const di = dates.findIndex(d => iso(d) === ex.date)
         if (di !== -1) items.push({ ...ex, day: di, startMin: toMin(ex.start), student: s, once: true })
       })
+      Object.entries(moves).forEach(([orig, mv]) => {
+        const di = dates.findIndex(d => iso(d) === mv.date)
+        if (di !== -1) items.push({
+          day: di, date: mv.date, start: mv.start, dur: mv.dur || 60,
+          startMin: toMin(mv.start), student: s, moved: true, origKey: orig,
+        })
+      })
     })
     return items.map(l => {
       const key = lessonKey(l)
       const entry = (l.student.log || []).find(e => e.date === l.date && e.start === l.start)
+      const paid = !!((l.student.marks || {})[key])
+      const done = !!entry && entry.kind !== 'cancelled'
+      const cancelled = !!entry && entry.kind === 'cancelled'
       return {
-        ...l, key,
-        paid: !!((l.student.marks || {})[key]),
-        done: !!entry && entry.kind !== 'cancelled',
-        cancelled: !!entry && entry.kind === 'cancelled',
+        ...l, key, paid, done, cancelled,
+        autoPaid: !paid && !done && !cancelled && autoPaid.get(l.student.id).has(key),
       }
     })
-  }, [students, dates])
+  }, [students, dates, autoPaid])
 
   // диапазон фиксированный 7:00–21:00; расширяется, только если урок выходит за него
   const [minH, maxH] = useMemo(() => {
@@ -691,7 +753,7 @@ function WeekView({ students, weekStart, onLessonClick, onAddLesson, onToggleMar
                       '--stu': COLORS[l.student.colorIdx % COLORS.length],
                     }}>
                     <b>{l.cancelled ? '✕ ' : ''}{l.student.name}</b>
-                    <span>{l.start}–{endTime(l.start, l.dur)}{l.type ? ' · ' + l.type : ''}{l.once ? ' · разовый' : ''}</span>
+                    <span>{l.start}–{endTime(l.start, l.dur)}{l.type ? ' · ' + l.type : ''}{l.once ? ' · разовый' : ''}{l.moved ? ' · перенесён' : ''}</span>
                     <span className="lticks">
                       <button
                         className={'ltick blue' + (l.done ? ' on' : '')}
@@ -701,10 +763,13 @@ function WeekView({ students, weekStart, onLessonClick, onAddLesson, onToggleMar
                         onClick={e => { e.stopPropagation(); onToggleDone(l.student, l) }}
                       >✓</button>
                       <button
-                        className={'ltick green' + (l.paid ? ' on' : '')}
-                        title={l.paid ? 'Урок оплачен — снять (уберёт зачисление)' : 'Урок оплачен (+ставка на счёт)'}
-                        aria-label={'Урок оплачен: ' + (l.paid ? 'да' : 'нет')}
-                        aria-pressed={l.paid}
+                        className={'ltick green' + (l.paid || l.autoPaid ? ' on' : '')}
+                        disabled={l.autoPaid}
+                        title={l.autoPaid
+                          ? 'Оплачено предоплатой с баланса — спишется при проведении'
+                          : l.paid ? 'Урок оплачен — снять (уберёт зачисление)' : 'Урок оплачен (+ставка на счёт)'}
+                        aria-label={'Урок оплачен: ' + (l.paid || l.autoPaid ? 'да' : 'нет')}
+                        aria-pressed={l.paid || l.autoPaid}
                         onClick={e => { e.stopPropagation(); onToggleMark(l.student, l.key) }}
                       >✓</button>
                     </span>
@@ -724,7 +789,9 @@ function WeekView({ students, weekStart, onLessonClick, onAddLesson, onToggleMar
 }
 
 /* ---------- окно урока в календаре ---------- */
-function LessonDialog({ student: s, lesson, onSave, onOpenProfile, onToggleMark, onToggleHw, onClose }) {
+function LessonDialog({ student: s, lesson, onSave, onOpenProfile, onToggleMark, onToggleHw, onMove, onUnmove, onClose }) {
+  const [mvDate, setMvDate] = useState(lesson.date)
+  const [mvStart, setMvStart] = useState(lesson.start)
   const prevEntry = (s.log || []).find(e => e.date === lesson.date && e.start === lesson.start)
   const initialStatus = prevEntry ? (prevEntry.kind === 'cancelled' ? 'cancelled' : 'done') : 'none'
   // правило 24 часов: отмена меньше чем за сутки — со списанием (можно поменять вручную)
@@ -806,6 +873,20 @@ function LessonDialog({ student: s, lesson, onSave, onOpenProfile, onToggleMark,
           <input type="checkbox" checked={paid} onChange={() => onToggleMark(s, lesson.key)} />
           <span>Этот урок оплачен</span>
         </label>
+        {lesson.autoPaid && !paid && <p className="hint">Покрыт предоплатой с баланса — спишется при проведении.</p>}
+        <div className="field" style={{ marginTop: 10 }}>
+          <label>Перенос урока (только эта дата, расписание не меняется)</label>
+          <div className="slot-edit" style={{ marginBottom: 0 }}>
+            <input type="date" value={mvDate} aria-label="Новая дата" onChange={e => setMvDate(e.target.value)} />
+            <input className="time" type="time" value={mvStart} aria-label="Новое время" onChange={e => setMvStart(e.target.value)} />
+            <button type="button" className="btn sm"
+              disabled={mvDate === lesson.date && mvStart === lesson.start}
+              onClick={() => onMove(s, lesson, mvDate, mvStart)}>Перенести</button>
+            {lesson.moved && (
+              <button type="button" className="btn ghost sm" onClick={() => onUnmove(s, lesson)}>Вернуть на место</button>
+            )}
+          </div>
+        </div>
         <div className="mfoot">
           <button type="button" className="btn ghost left" onClick={onOpenProfile}>Профиль ученика →</button>
           <button type="button" className="btn" onClick={onClose}>Отмена</button>
@@ -1172,6 +1253,35 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
   const handleRemoveExtra = (s, i) =>
     save(s.id, { ...s, extra: (s.extra || []).filter((_, j) => j !== i) })
 
+  // перенос: разовый урок правится на месте, у слота появляется move на конкретную дату
+  const handleMove = (s, lesson, date, start) => {
+    if (!date || !start) return
+    const next = { ...s }
+    if (lesson.once) {
+      next.extra = (s.extra || []).map(e =>
+        e.date === lesson.date && e.start === lesson.start ? { ...e, date, start } : e)
+    } else {
+      const origKey = lesson.moved ? lesson.origKey : lessonKey(lesson)
+      next.moves = { ...(s.moves || {}), [origKey]: { date, start, dur: lesson.dur } }
+    }
+    save(s.id, next)
+    setWeekStart(mondayOf(new Date(date + 'T00:00')))
+    setLessonDlg(null)
+  }
+
+  const handleUnmove = (s, lesson) => {
+    const moves = { ...(s.moves || {}) }
+    delete moves[lesson.origKey]
+    save(s.id, { ...s, moves })
+    setLessonDlg(null)
+  }
+
+  const handleRemoveMove = (s, origKey) => {
+    const moves = { ...(s.moves || {}) }
+    delete moves[origKey]
+    save(s.id, { ...s, moves })
+  }
+
   const handleMakeJoin = s => save(s.id, { ...s, join: uid() + uid() })
 
   const showTab = t => { setTab(t); setOpenId(null) }
@@ -1222,6 +1332,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
           onPay={() => setPayingId(open.id)}
           onTick={handleTick}
           onRemoveExtra={i => handleRemoveExtra(open, i)}
+          onRemoveMove={k => handleRemoveMove(open, k)}
           serverMode={mode === 'server'}
           onMakeJoin={() => handleMakeJoin(open)}
           onToggleHw={id => handleToggleHw(open, id)}
@@ -1287,6 +1398,8 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
           onSave={handleLessonDialogSave}
           onToggleMark={handleToggleMark}
           onToggleHw={handleToggleHw}
+          onMove={handleMove}
+          onUnmove={handleUnmove}
           onOpenProfile={() => { setTab('students'); setOpenId(lessonDlg.studentId); setLessonDlg(null) }}
           onClose={() => setLessonDlg(null)}
         />
@@ -1530,6 +1643,16 @@ function StudentApp({ join }) {
               <span className="t">{ex.dur} мин</span>
             </div>
           ))}
+          {Object.entries(stu.moves || {}).filter(([, mv]) => mv.date >= todayStr)
+            .sort((a, b) => a[1].date.localeCompare(b[1].date))
+            .map(([k, mv]) => (
+              <div className="slot-line" key={'m' + k}>
+                <span className="d" style={{ width: 64 }}>{fmtDate(mv.date)}</span>
+                <span>{mv.start}–{endTime(mv.start, mv.dur || 60)}</span>
+                <span className="lvl">перенос</span>
+                <span className="t">вместо {fmtDate(k.split('|')[0])}</span>
+              </div>
+            ))}
           <p className="hint">Время показано местное — вашего устройства.</p>
         </section>
         <section className="pcard">

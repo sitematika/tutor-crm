@@ -167,6 +167,7 @@ switch ($action) {
       'bookmark' => $s['bookmark'] ?? '',
       'slots' => $s['slots'] ?? [],
       'extra' => $s['extra'] ?? [],
+      'moves' => $s['moves'] ?? new stdClass(),
       'balance' => $s['balance'] ?? 0,
       'rate' => $s['rate'] ?? 0,
       'paidTick' => $s['paidTick'] ?? false,
