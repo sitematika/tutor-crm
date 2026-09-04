@@ -43,8 +43,9 @@ const yearsWord = n => {
 const ageLabel = s => (s.age ? `${s.age} ${yearsWord(Number(s.age))}` : s.grade ? `${s.grade} кл.` : '')
 const lessonKey = l => l.date + '|' + l.start
 
-/* Статус оплаты — от счёта И от уроков: долг > предоплата > отметка
-   «оплачен» на ближайшем уроке / ручная галочка > ждёт оплаты */
+/* Статус оплаты — от счёта И от уроков. Долг есть только если
+   проведённый урок не оплачен (счёт ушёл в минус); будущие уроки
+   долгом не считаются — при нуле без долга ученик «рассчитан». */
 function payStatus(s) {
   const b = s.balance || 0
   const rate = s.rate || 0
@@ -54,7 +55,7 @@ function payStatus(s) {
   const nextPaid = next && (s.marks || {})[next.date + '|' + next.sl.start]
   if (s.paidTick || nextPaid) return { k: 'paid', label: 'Оплачено ✓' }
   if (b > 0) return { k: 'due', label: 'Мало на счету' }
-  return { k: 'due', label: 'Ждёт оплаты' }
+  return { k: 'paid', label: 'Всё оплачено' }
 }
 
 /* Ближайший урок ученика (слот + конкретная дата) */
