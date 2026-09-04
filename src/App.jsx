@@ -53,7 +53,13 @@ const lessonKey = l => l.date + '|' + l.start
    предстоящих занятий (без проведённых/отменённых и оплаченных вручную) */
 function autoPaidKeys(s) {
   const rate = s.rate || 0
-  let n = rate > 0 ? Math.floor((s.balance || 0) / rate) : 0
+  // деньги, зачисленные галочкой за ещё не проведённые уроки, зарезервированы
+  // за этими уроками — они не покрывают другие занятия
+  const reserved = Object.keys(s.marks || {}).filter(k =>
+    (s.payments || []).some(p => p.auto && p.lesson === k) &&
+    !(s.log || []).some(e => e.date + '|' + e.start === k)
+  ).length
+  let n = rate > 0 ? Math.floor((s.balance || 0) / rate) - reserved : 0
   const keys = new Set()
   if (n <= 0) return keys
   const logged = new Set((s.log || []).map(e => e.date + '|' + e.start))
