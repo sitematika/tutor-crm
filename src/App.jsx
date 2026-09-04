@@ -122,6 +122,25 @@ function Ava({ student, size = 30 }) {
   )
 }
 
+/* Иконки нижней навигации (мобильная версия) */
+const IcoUsers = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
+    <path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
+  </svg>
+)
+const IcoCal = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" />
+    <line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
+  </svg>
+)
+const IcoPay = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="1" y="4" width="22" height="16" rx="2" /><line x1="1" y1="10" x2="23" y2="10" />
+  </svg>
+)
+
 /* Тип урока: обычный (пусто), пробный или уровень CEFR */
 function TypeOptions() {
   return (
@@ -164,7 +183,7 @@ function Modal({ title, onClose, children }) {
 /* ---------- student form ---------- */
 function StudentForm({ initial, onSave, onClose, onDelete }) {
   const [f, setF] = useState(() => initial || {
-    name: '', level: 'B1', age: '', rate: 500, contact: '', notes: '', homework: '', bookmark: '', balance: 0,
+    name: '', level: 'B1', age: '', rate: 500, contact: '', notes: '', bookmark: '', balance: 0,
     slots: [{ day: 0, start: '16:00', dur: 60 }],
     payments: [], colorIdx: 0, paidTick: false,
   })
@@ -235,11 +254,6 @@ function StudentForm({ initial, onSave, onClose, onDelete }) {
             onClick={() => setF(p => ({ ...p, slots: [...p.slots, { day: 0, start: '16:00', dur: 60 }] }))}>
             + слот
           </button>
-        </div>
-        <div className="field">
-          <label htmlFor="f-homework">Домашнее задание</label>
-          <textarea id="f-homework" value={f.homework || ''} onChange={e => set('homework', e.target.value)}
-            placeholder="Что задано к следующему уроку — увидит ученик в своём кабинете" />
         </div>
         <div className="field">
           <label htmlFor="f-notes">Заметки (видны только вам)</label>
@@ -406,7 +420,7 @@ function InviteLink({ join }) {
   )
 }
 
-function ProfileView({ student: s, onBack, onEdit, onPay, onTick, onRemoveExtra, serverMode, onMakeJoin }) {
+function ProfileView({ student: s, onBack, onEdit, onPay, onTick, onRemoveExtra, serverMode, onMakeJoin, onToggleHw, onDeleteHw }) {
   const payments = (s.payments || []).slice().reverse()
   const lessonsLeft = s.rate > 0 && s.balance > 0 ? Math.floor(s.balance / s.rate) : 0
   return (
@@ -453,8 +467,25 @@ function ProfileView({ student: s, onBack, onEdit, onPay, onTick, onRemoveExtra,
                 ))}
             </>
           )}
-          <h4>Домашнее задание</h4>
-          <p className="notes-p" style={{ marginTop: 0 }}>{s.homework || '—'}</p>
+          <h4>Домашние задания</h4>
+          {(s.homeworks || []).length
+            ? s.homeworks.slice().reverse().map(h => (
+                <div className="hwrow" key={h.id}>
+                  <button className={'tick' + (h.done ? ' on' : '')}
+                    title={h.done ? 'Сделано — снять отметку' : 'Отметить: сделано'}
+                    aria-label={'ДЗ ' + (h.done ? 'сделано' : 'не сделано')}
+                    aria-pressed={!!h.done}
+                    onClick={() => onToggleHw(h.id)}>✓</button>
+                  <div className="hwbody">
+                    <span className="hwdate">{fmtDate(h.date)}{h.done ? ' · сделано' : ''}</span>
+                    <p>{h.text}</p>
+                  </div>
+                  <button className="btn ghost sm" aria-label="Удалить ДЗ" onClick={() => onDeleteHw(h.id)}>✕</button>
+                </div>
+              ))
+            : s.homework
+              ? <p className="notes-p" style={{ marginTop: 0 }}>{s.homework}</p>
+              : <p style={{ color: 'var(--muted)', margin: 0 }}>Задавайте ДЗ в окне урока в календаре — они появятся здесь со статусом.</p>}
           <h4>Где остановились</h4>
           <p style={{ margin: 0 }}>{s.bookmark || '—'}</p>
           {serverMode && (
@@ -494,11 +525,14 @@ function ProfileView({ student: s, onBack, onEdit, onPay, onTick, onRemoveExtra,
           <h4>Проведённые уроки</h4>
           {(s.log || []).length
             ? s.log.slice().reverse().map((e, i) => (
-                <div className="logcard" key={i}>
+                <div className={'logcard' + (e.kind === 'cancelled' ? ' cancel' : '')} key={i}>
                   <div className="logtop">
                     <b>{fmtDate(e.date)}</b>
                     <span>{e.start}–{endTime(e.start, e.dur)} · {e.dur} мин{e.type ? ' · ' + e.type : ''}</span>
                   </div>
+                  {e.kind === 'cancelled' && (
+                    <p className="loghw">Отменён · {e.charged !== false ? 'со списанием' : 'без списания'}</p>
+                  )}
                   {e.hw && <p className="loghw">ДЗ: {e.hw}</p>}
                 </div>
               ))
@@ -542,10 +576,12 @@ function WeekView({ students, weekStart, onLessonClick, onAddLesson, onToggleMar
     })
     return items.map(l => {
       const key = lessonKey(l)
+      const entry = (l.student.log || []).find(e => e.date === l.date && e.start === l.start)
       return {
         ...l, key,
         paid: !!((l.student.marks || {})[key]),
-        done: (l.student.log || []).some(e => e.date === l.date && e.start === l.start),
+        done: !!entry && entry.kind !== 'cancelled',
+        cancelled: !!entry && entry.kind === 'cancelled',
       }
     })
   }, [students, dates])
@@ -592,7 +628,7 @@ function WeekView({ students, weekStart, onLessonClick, onAddLesson, onToggleMar
                   <div className="hline" key={h} style={{ top: (h - minH) * PX_PER_HOUR }} />
                 ))}
                 {dayItems.map(l => (
-                  <div className={'lesson' + (l.type === 'Пробный' ? ' trial' : '') + (l.done ? ' isdone' : '')} key={l.key + l.student.id}
+                  <div className={'lesson' + (l.type === 'Пробный' ? ' trial' : '') + (l.done ? ' isdone' : '') + (l.cancelled ? ' iscancel' : '')} key={l.key + l.student.id}
                     role="button" tabIndex={0}
                     onClick={() => onLessonClick(l)}
                     onKeyDown={e => { if (e.key === 'Enter') onLessonClick(l) }}
@@ -603,7 +639,7 @@ function WeekView({ students, weekStart, onLessonClick, onAddLesson, onToggleMar
                       width: `calc(${100 / l.lanes}% - 6px)`,
                       '--stu': COLORS[l.student.colorIdx % COLORS.length],
                     }}>
-                    <b>{l.done ? '✓ ' : ''}{l.student.name}</b>
+                    <b>{l.done ? '✓ ' : l.cancelled ? '✕ ' : ''}{l.student.name}</b>
                     <span>{l.start}–{endTime(l.start, l.dur)}{l.type ? ' · ' + l.type : ''}{l.once ? ' · разовый' : ''}</span>
                     <button
                       className={'ltick' + (l.paid ? ' on' : '')}
@@ -619,44 +655,82 @@ function WeekView({ students, weekStart, onLessonClick, onAddLesson, onToggleMar
           })}
         </div>
       </div>
-      <p className="weeknote">Клик по уроку — отметить проведённым и записать домашку; маленькая галочка в углу — отметка «оплачено».</p>
+      <p className="weeknote">Клик по уроку — статус (проведён/отменён) и домашка; галочка в углу — «оплачено». Время показано местное — вашего устройства.</p>
     </>
   )
 }
 
 /* ---------- окно урока в календаре ---------- */
-function LessonDialog({ student: s, lesson, onSave, onOpenProfile, onToggleMark, onClose }) {
-  const wasDone = (s.log || []).some(e => e.date === lesson.date && e.start === lesson.start)
-  const [done, setDone] = useState(wasDone)
-  const [hw, setHw] = useState(s.homework || '')
+function LessonDialog({ student: s, lesson, onSave, onOpenProfile, onToggleMark, onToggleHw, onClose }) {
+  const prevEntry = (s.log || []).find(e => e.date === lesson.date && e.start === lesson.start)
+  const initialStatus = prevEntry ? (prevEntry.kind === 'cancelled' ? 'cancelled' : 'done') : 'none'
+  // правило 24 часов: отмена меньше чем за сутки — со списанием (можно поменять вручную)
+  const under24 = new Date(lesson.date + 'T' + lesson.start).getTime() - Date.now() < 24 * 3600 * 1000
+  const [status, setStatus] = useState(initialStatus)
+  const [charge, setCharge] = useState(
+    prevEntry && prevEntry.kind === 'cancelled' ? prevEntry.charged !== false : under24
+  )
+  // домашка, заданная именно на этом уроке (если окно открыли повторно)
+  const ownHw = (s.homeworks || []).find(h => h.date === lesson.date)
+  const [hw, setHw] = useState(ownHw ? ownHw.text : '')
+  // последняя домашка с прошлых уроков — проверить «сделано»
+  const prevHw = (s.homeworks || []).filter(h => h.date !== lesson.date).slice(-1)[0]
   const paid = !!((s.marks || {})[lesson.key])
 
   const submit = e => {
     e.preventDefault()
-    onSave({ lesson, done, wasDone, hw })
+    onSave({ lesson, status, prevEntry, hw, charge })
   }
 
   return (
     <Modal title={s.name} onClose={onClose}>
       <p className="hint" style={{ marginTop: -10 }}>
         {DAYS[lesson.day]}, {fmtDate(lesson.date)} · {lesson.start}–{endTime(lesson.start, lesson.dur)} · {lesson.dur} мин
-        {lesson.type ? ' · ' + lesson.type : ''}
+        {lesson.type ? ' · ' + lesson.type : ''} · местное время
       </p>
       <form onSubmit={submit}>
-        <label className="check-line">
-          <input type="checkbox" checked={done} onChange={e => setDone(e.target.checked)} />
-          <span>Урок проведён</span>
-        </label>
-        {done && !wasDone && (
+        <div className="field">
+          <label>Статус урока</label>
+          <div className="seg" role="radiogroup" aria-label="Статус урока">
+            <button type="button" className={status === 'none' ? 'on' : ''} onClick={() => setStatus('none')}>Запланирован</button>
+            <button type="button" className={status === 'done' ? 'on' : ''} onClick={() => setStatus('done')}>Проведён ✓</button>
+            <button type="button" className={status === 'cancelled' ? 'on' : ''} onClick={() => setStatus('cancelled')}>Отменён ✕</button>
+          </div>
+        </div>
+        {status === 'done' && initialStatus !== 'done' && (
           <p className="hint">
             {s.paidTick
               ? 'Стоит галочка «оплачен отдельно» — она снимется, счёт не изменится.'
               : `Со счёта спишется ${fmtMoney(s.rate)}.`}
           </p>
         )}
-        {!done && wasDone && <p className="hint">Отметка снимется, списание вернётся на счёт.</p>}
+        {status === 'cancelled' && (
+          <>
+            <label className="check-line">
+              <input type="checkbox" checked={charge} onChange={e => setCharge(e.target.checked)} />
+              <span>Списать оплату за отмену</span>
+            </label>
+            <p className="hint">
+              {under24
+                ? 'До урока меньше 24 часов — по правилу оплата списывается. Галочку можно снять вручную.'
+                : 'Отмена больше чем за 24 часа — по правилу без списания. При необходимости можно списать.'}
+            </p>
+          </>
+        )}
+        {status === 'none' && initialStatus !== 'none' && (
+          <p className="hint">Отметка снимется, списание (если было) вернётся на счёт.</p>
+        )}
+        {prevHw && (
+          <div className="prevhw">
+            <label className="check-line" style={{ margin: 0 }}>
+              <input type="checkbox" checked={!!prevHw.done} onChange={() => onToggleHw(s, prevHw.id)} />
+              <span>Прошлое ДЗ сделано</span>
+            </label>
+            <p className="hint">{fmtDate(prevHw.date)}: {prevHw.text}</p>
+          </div>
+        )}
         <div className="field" style={{ marginTop: 10 }}>
-          <label htmlFor="ld-hw">Домашнее задание к следующему уроку</label>
+          <label htmlFor="ld-hw">Домашнее задание на следующий урок</label>
           <textarea id="ld-hw" value={hw} onChange={e => setHw(e.target.value)}
             placeholder="Ученик увидит это в своём кабинете" />
         </div>
@@ -915,31 +989,54 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
 
   const handleTick = s => save(s.id, { ...s, paidTick: !s.paidTick })
 
-  // сохранение из окна урока: отметка «проведён» (со списанием/возвратом) + домашка
-  const handleLessonDialogSave = ({ lesson, done, wasDone, hw }) => {
+  // сохранение из окна урока: статус (проведён/отменён, правило 24 ч) + домашка
+  const handleLessonDialogSave = ({ lesson, status, prevEntry, hw, charge }) => {
     const s = byId(lessonDlg.studentId)
     if (!s) { setLessonDlg(null); return }
-    const next = { ...s, homework: hw }
+    const next = { ...s }
     const isEntry = e => e.date === lesson.date && e.start === lesson.start
-    if (done && !wasDone) {
-      const paidBy = s.paidTick ? 'tick' : 'balance'
-      if (paidBy === 'tick') next.paidTick = false
-      else next.balance = (next.balance || 0) - (next.rate || 0)
-      next.log = [...(s.log || []), {
-        date: lesson.date, start: lesson.start, dur: lesson.dur,
-        type: lesson.type, hw: hw || undefined, paidBy,
-      }]
-    } else if (!done && wasDone) {
-      const entry = (s.log || []).find(isEntry)
-      next.log = (s.log || []).filter(e => !isEntry(e))
-      if (entry && entry.paidBy === 'tick') next.paidTick = true
+
+    // старая запись убирается, её списание (если было) возвращается
+    next.log = (s.log || []).filter(e => !isEntry(e))
+    if (prevEntry && prevEntry.charged !== false) {
+      if (prevEntry.paidBy === 'tick') next.paidTick = true
       else next.balance = (next.balance || 0) + (next.rate || 0)
-    } else if (done && wasDone) {
-      next.log = (s.log || []).map(e => (isEntry(e) ? { ...e, hw: hw || undefined } : e))
     }
+
+    // домашка этого урока — отдельной записью со статусом «сделано/нет»
+    const text = (hw || '').trim()
+    const hws = (s.homeworks || []).slice()
+    const hwIdx = hws.findIndex(h => h.date === lesson.date)
+    if (text) {
+      if (hwIdx >= 0) hws[hwIdx] = { ...hws[hwIdx], text }
+      else hws.push({ id: uid(), date: lesson.date, text, done: false })
+    } else if (hwIdx >= 0) hws.splice(hwIdx, 1)
+    next.homeworks = hws
+
+    // новая запись: проведён — всегда со списанием; отменён — по галочке
+    if (status !== 'none') {
+      const willCharge = status === 'done' ? true : !!charge
+      let paidBy
+      if (willCharge) {
+        paidBy = next.paidTick ? 'tick' : 'balance'
+        if (paidBy === 'tick') next.paidTick = false
+        else next.balance = (next.balance || 0) - (next.rate || 0)
+      }
+      next.log = [...next.log, {
+        date: lesson.date, start: lesson.start, dur: lesson.dur, type: lesson.type,
+        kind: status, charged: willCharge, paidBy, hw: text || undefined,
+      }]
+    }
+
     save(s.id, next)
     setLessonDlg(null)
   }
+
+  const handleToggleHw = (s, id) =>
+    save(s.id, { ...s, homeworks: (s.homeworks || []).map(h => (h.id === id ? { ...h, done: !h.done } : h)) })
+
+  const handleDeleteHw = (s, id) =>
+    save(s.id, { ...s, homeworks: (s.homeworks || []).filter(h => h.id !== id) })
 
   const handlePaySave = p => {
     const s = paying
@@ -1017,6 +1114,8 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
           onRemoveExtra={i => handleRemoveExtra(open, i)}
           serverMode={mode === 'server'}
           onMakeJoin={() => handleMakeJoin(open)}
+          onToggleHw={id => handleToggleHw(open, id)}
+          onDeleteHw={id => handleDeleteHw(open, id)}
         />
       )}
 
@@ -1076,6 +1175,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
           lesson={lessonDlg.lesson}
           onSave={handleLessonDialogSave}
           onToggleMark={handleToggleMark}
+          onToggleHw={handleToggleHw}
           onOpenProfile={() => { setTab('students'); setOpenId(lessonDlg.studentId); setLessonDlg(null) }}
           onClose={() => setLessonDlg(null)}
         />
@@ -1092,6 +1192,18 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
           ? 'Данные сохраняются на сервере — доступны с любого устройства.'
           : 'Данные хранятся в этом браузере.'}
       </p>
+
+      <nav className="bottombar" aria-label="Разделы">
+        <button className={tab === 'students' ? 'on' : ''} onClick={() => showTab('students')}>
+          <IcoUsers /><span>Ученики</span>
+        </button>
+        <button className={tab === 'week' ? 'on' : ''} onClick={() => showTab('week')}>
+          <IcoCal /><span>Неделя</span>
+        </button>
+        <button className={tab === 'pay' ? 'on' : ''} onClick={() => showTab('pay')}>
+          <IcoPay /><span>Оплаты</span>
+        </button>
+      </nav>
     </div>
   )
 }
@@ -1267,7 +1379,17 @@ function StudentApp({ join }) {
       <div className="pcards">
         <section className="pcard">
           <h4>Домашнее задание</h4>
-          <p className="notes-p">{stu.homework || 'Пока ничего не задано 🎉'}</p>
+          {(stu.homeworks || []).length
+            ? stu.homeworks.slice().reverse().slice(0, 6).map(h => (
+                <div className="hwrow" key={h.id}>
+                  <span className={'hwstat' + (h.done ? ' ok' : '')}>{h.done ? '✓' : '•'}</span>
+                  <div className="hwbody">
+                    <span className="hwdate">{fmtDate(h.date)}{h.done ? ' · сделано' : ' · к следующему уроку'}</span>
+                    <p>{h.text}</p>
+                  </div>
+                </div>
+              ))
+            : <p className="notes-p">{stu.homework || 'Пока ничего не задано 🎉'}</p>}
           {stu.bookmark && <p className="hint">📖 Остановились: {stu.bookmark}</p>}
         </section>
         <section className="pcard">
@@ -1290,6 +1412,7 @@ function StudentApp({ join }) {
               <span className="t">{ex.dur} мин</span>
             </div>
           ))}
+          <p className="hint">Время показано местное — вашего устройства.</p>
         </section>
         <section className="pcard">
           <h4>Оплата</h4>

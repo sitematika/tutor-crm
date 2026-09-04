@@ -291,6 +291,22 @@ table.pay td.mutedcell { color: var(--muted); }
 .modal .mfoot .left { margin-right: auto; }
 .check-line { display: flex; align-items: center; gap: 8px; font-weight: 600; margin: 4px 0 8px; cursor: pointer; }
 .check-line input { accent-color: var(--accent); width: 16px; height: 16px; }
+.seg { display: flex; gap: 6px; }
+.seg button {
+  flex: 1; border: 1px solid var(--line); background: var(--surface); border-radius: 8px;
+  padding: 8px 6px; font-weight: 600; font-size: 13.5px;
+}
+.seg button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.prevhw { border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; margin: 10px 0 4px; background: var(--bg); }
+.prevhw .hint { margin: 3px 0 0; }
+.hwrow { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.hwrow:last-of-type { border-bottom: none; }
+.hwrow .hwbody { flex: 1; min-width: 0; }
+.hwrow .hwdate { color: var(--muted); font-size: 12px; font-weight: 700; }
+.hwrow p { margin: 2px 0 0; white-space: pre-wrap; }
+.hwstat { color: var(--muted); font-weight: 700; width: 16px; text-align: center; flex: none; }
+.hwstat.ok { color: var(--ok); }
+.logcard.cancel .logtop b { text-decoration: line-through; }
 
 /* ---- экран входа ---- */
 .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
@@ -319,4 +335,63 @@ table.pay td.mutedcell { color: var(--muted); }
 .pcard h4 { margin: 0 0 10px; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 
 .storage-note { color: var(--muted); font-size: 12.5px; margin-top: 28px; text-align: center; }
+
+/* ---- мобильная версия: нижняя навигация, крупные касания ---- */
+.bottombar { display: none; }
+@media (max-width: 640px) {
+  .app { padding: 12px 14px calc(78px + env(safe-area-inset-bottom)); }
+  header.top { padding-bottom: 12px; margin-bottom: 16px; gap: 10px; }
+  nav.tabs { display: none; }
+  .bottombar {
+    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+    background: var(--surface); border-top: 1px solid var(--line);
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+    box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.08);
+  }
+  .bottombar button {
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+    border: none; background: none; color: var(--muted);
+    font-size: 11px; font-weight: 700; padding: 7px 4px; min-height: 50px; border-radius: 12px;
+  }
+  .bottombar button.on { color: var(--accent); background: var(--accent-soft); }
+  .bottombar button svg { width: 22px; height: 22px; }
+
+  .btn { min-height: 42px; }
+  .btn.sm { min-height: 36px; }
+  .btn.primary { min-height: 46px; padding: 10px 18px; font-size: 15px; }
+  .theme-btn { width: 42px; height: 42px; }
+  .tick { width: 26px; height: 26px; border-radius: 8px; }
+  .ltick { width: 22px; height: 22px; }
+
+  .viewhead { gap: 10px; }
+  .viewhead h2 { font-size: 21px; }
+  .viewhead > .btn.primary { flex: 1 1 100%; }
+  .weeknav { width: 100%; justify-content: space-between; }
+  .weeknav .btn { flex: 1; }
+  .weeknav input.weekpick { flex: 1 1 100%; min-height: 40px; }
+
+  .cards { grid-template-columns: 1fr; }
+  .stats { grid-template-columns: 1fr 1fr; }
+  .stat b { font-size: 23px; }
+
+  .profile .phead { padding: 16px 16px 14px; }
+  .profile .phead .actions { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-left: 0; }
+  .profile .phead .actions .btn { width: 100%; }
+  .pcol { padding: 16px 16px 18px; }
+
+  /* поля 16px — iOS не зумит при фокусе */
+  .field input, .field select, .field textarea,
+  .slot-edit input, .slot-edit select, .invite input, .weeknav input.weekpick { font-size: 16px; }
+  .slot-edit input, .slot-edit select { min-height: 40px; }
+  .seg button { min-height: 44px; }
+
+  /* модалки как bottom-sheet */
+  .overlay { padding: 0; align-items: flex-end; }
+  .modal {
+    max-width: 100%; border-radius: 16px 16px 0 0; border-bottom: none;
+    padding: 20px 18px calc(18px + env(safe-area-inset-bottom));
+    max-height: 92dvh; overflow-y: auto;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
