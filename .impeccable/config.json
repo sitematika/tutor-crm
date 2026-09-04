@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "src/index.css"
+        ],
+        "createdAt": "2026-09-04T15:00:21.139Z",
+        "reason": "Claude: colored left edge on .lesson is the standard calendar-event convention (per-student color coding in the week grid), domain-appropriate, not a decorative card rail"
+      }
+    ]
+  }
+}

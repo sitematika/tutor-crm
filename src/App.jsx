@@ -19,6 +19,19 @@ const endTime = (start, dur) => {
   const m = toMin(start) + dur
   return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0')
 }
+const iso = d => {
+  const z = new Date(d)
+  z.setMinutes(z.getMinutes() - z.getTimezoneOffset())
+  return z.toISOString().slice(0, 10)
+}
+const mondayOf = d => {
+  const m = new Date(d)
+  m.setHours(0, 0, 0, 0)
+  m.setDate(m.getDate() - ((m.getDay() + 6) % 7))
+  return m
+}
+const addDays = (d, n) => { const c = new Date(d); c.setDate(c.getDate() + n); return c }
+const MONTHS = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
 
 /* Статус оплаты: ручная галочка > денежный счёт */
 function payStatus(s) {
@@ -103,6 +116,17 @@ function persist(data) {
 function Pill({ student }) {
   const st = payStatus(student)
   return <span className={'pill ' + st.k}>{st.label}</span>
+}
+
+const initials = name => (name || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase()
+
+function Ava({ student, size = 30 }) {
+  return (
+    <span className="ava" aria-hidden="true"
+      style={{ background: COLORS[student.colorIdx % COLORS.length], width: size, height: size, fontSize: Math.round(size * 0.37) }}>
+      {initials(student.name)}
+    </span>
+  )
 }
 
 function Tick({ student, onToggle }) {
@@ -242,14 +266,19 @@ function PaymentForm({ student, onSave, onClose }) {
 }
 
 /* ---------- lesson form (новый урок из сетки недели) ---------- */
-function LessonForm({ students, onSave, onClose }) {
-  const [f, setF] = useState({ studentId: students[0]?.id || '', day: todayIdx(), start: '16:00', dur: 60 })
+function LessonForm({ students, defaultDate, onSave, onClose }) {
+  const [f, setF] = useState({
+    studentId: students[0]?.id || '',
+    date: defaultDate || iso(new Date()),
+    start: '16:00', dur: 60, weekly: true,
+  })
   const set = (k, v) => setF(p => ({ ...p, [k]: v }))
   const submit = e => {
     e.preventDefault()
-    if (!f.studentId) return
+    if (!f.studentId || !f.date) return
     onSave(f)
   }
+  const dayName = f.date ? DAYS[(new Date(f.date + 'T00:00').getDay() + 6) % 7] : ''
   return (
     <Modal title="Новый урок" onClose={onClose}>
       <form onSubmit={submit}>
@@ -261,10 +290,8 @@ function LessonForm({ students, onSave, onClose }) {
         </div>
         <div className="frow">
           <div className="field">
-            <label htmlFor="l-day">День</label>
-            <select id="l-day" value={f.day} onChange={e => set('day', Number(e.target.value))}>
-              {DAYS.map((d, j) => <option key={j} value={j}>{d}</option>)}
-            </select>
+            <label htmlFor="l-date">Дата</label>
+            <input id="l-date" type="date" value={f.date} onChange={e => set('date', e.target.value)} />
           </div>
           <div className="field">
             <label htmlFor="l-start">Начало</label>
@@ -277,7 +304,15 @@ function LessonForm({ students, onSave, onClose }) {
             </select>
           </div>
         </div>
-        <p className="hint">Урок добавится в еженедельное расписание ученика.</p>
+        <label className="check-line">
+          <input type="checkbox" checked={f.weekly} onChange={e => set('weekly', e.target.checked)} />
+          <span>Повторять каждую неделю{dayName ? ` (${dayName})` : ''}</span>
+        </label>
+        <p className="hint">
+          {f.weekly
+            ? 'Урок добавится в еженедельное расписание ученика.'
+            : 'Разовый урок — появится только на выбранной дате.'}
+        </p>
         <div className="mfoot">
           <button type="button" className="btn" onClick={onClose}>Отмена</button>
           <button type="submit" className="btn primary">Добавить урок</button>
@@ -305,8 +340,8 @@ function StudentsView({ students, onOpen, onAdd, onTick }) {
             <div role="button" tabIndex={0} style={{ display: 'contents' }}
               onClick={() => onOpen(s.id)}
               onKeyDown={e => { if (e.key === 'Enter') onOpen(s.id) }}>
-              <div className="name-row" style={{ '--stu': COLORS[s.colorIdx % COLORS.length] }}>
-                <span className="dot" />
+              <div className="name-row">
+                <Ava student={s} />
                 <h3>{s.name}</h3>
                 <Tick student={s} onToggle={onTick} />
                 <span className="lvl">{s.level}</span>
@@ -329,13 +364,13 @@ function StudentsView({ students, onOpen, onAdd, onTick }) {
 }
 
 /* ---------- profile view ---------- */
-function ProfileView({ student: s, onBack, onEdit, onLessonDone, onPay, onTick }) {
+function ProfileView({ student: s, onBack, onEdit, onLessonDone, onPay, onTick, onRemoveExtra }) {
   const payments = (s.payments || []).slice().reverse()
   const lessonsLeft = s.rate > 0 && s.balance > 0 ? Math.floor(s.balance / s.rate) : 0
   return (
-    <div className="profile" style={{ '--stu': COLORS[s.colorIdx % COLORS.length] }}>
+    <div className="profile">
       <div className="phead">
-        <span className="dot" />
+        <Ava student={s} size={44} />
         <div>
           <h2>{s.name}</h2>
           <span className="sub">Уровень {s.level} · {fmtMoney(s.rate)} / урок</span>
@@ -359,6 +394,22 @@ function ProfileView({ student: s, onBack, onEdit, onLessonDone, onPay, onTick }
                 </div>
               ))
             : <p style={{ color: 'var(--muted)', margin: 0 }}>Слоты не заданы — добавьте в редактировании.</p>}
+          {(s.extra || []).length > 0 && (
+            <>
+              <h4>Разовые уроки</h4>
+              {s.extra.map((ex, i) => ({ ...ex, i }))
+                .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start))
+                .map(ex => (
+                  <div className="slot-line" key={ex.i}>
+                    <span className="d" style={{ width: 64 }}>{fmtDate(ex.date)}</span>
+                    <span>{ex.start}–{endTime(ex.start, ex.dur)}</span>
+                    <span className="t">{ex.dur} мин</span>
+                    <button className="btn ghost sm" aria-label="Удалить разовый урок"
+                      onClick={() => onRemoveExtra(ex.i)}>✕</button>
+                  </div>
+                ))}
+            </>
+          )}
           <h4>Где остановились</h4>
           <p style={{ margin: 0 }}>{s.bookmark || '—'}</p>
           <h4>Контакты и заметки</h4>
@@ -412,10 +463,26 @@ function layoutLanes(items) {
   return sorted
 }
 
-function WeekView({ students, onOpen, onAddLesson }) {
-  const lessons = useMemo(() =>
-    students.flatMap(s => (s.slots || []).map(sl => ({ ...sl, startMin: toMin(sl.start), student: s }))),
-    [students])
+function WeekView({ students, weekStart, onOpen, onAddLesson, onToggleMark }) {
+  const dates = useMemo(() => DAYS.map((_, i) => addDays(weekStart, i)), [weekStart])
+  const todayIso = iso(new Date())
+
+  const lessons = useMemo(() => {
+    const items = []
+    students.forEach(s => {
+      ;(s.slots || []).forEach(sl => {
+        items.push({ ...sl, date: iso(dates[sl.day]), startMin: toMin(sl.start), student: s })
+      })
+      ;(s.extra || []).forEach(ex => {
+        const di = dates.findIndex(d => iso(d) === ex.date)
+        if (di !== -1) items.push({ ...ex, day: di, startMin: toMin(ex.start), student: s, once: true })
+      })
+    })
+    return items.map(l => {
+      const key = l.date + '|' + l.start
+      return { ...l, key, paid: !!((l.student.marks || {})[key]) }
+    })
+  }, [students, dates])
 
   const [minH, maxH] = useMemo(() => {
     if (!lessons.length) return [9, 20]
@@ -427,14 +494,11 @@ function WeekView({ students, onOpen, onAddLesson }) {
   const hours = []
   for (let h = minH; h <= maxH; h++) hours.push(h)
   const colH = (maxH - minH) * PX_PER_HOUR
-  const tIdx = todayIdx()
-  const monday = new Date()
-  monday.setDate(monday.getDate() - tIdx)
 
   if (!lessons.length) return (
     <div className="empty">
-      <h3>Неделя пуста</h3>
-      <p>Добавьте урок — здесь появится общая сетка всех учеников.</p>
+      <h3>На этой неделе уроков нет</h3>
+      <p>Добавьте урок или перелистните неделю стрелками выше.</p>
       {students.length > 0 && <button className="btn primary" onClick={onAddLesson}>+ Урок</button>}
     </div>
   )
@@ -444,15 +508,11 @@ function WeekView({ students, onOpen, onAddLesson }) {
       <div className="week-wrap">
         <div className="week">
           <div className="wh" aria-hidden="true"></div>
-          {DAYS.map((d, i) => {
-            const date = new Date(monday)
-            date.setDate(monday.getDate() + i)
-            return (
-              <div className={'wh' + (i === tIdx ? ' today' : '')} key={d}>
-                {d}<span className="dnum">{date.getDate()}</span>
-              </div>
-            )
-          })}
+          {DAYS.map((d, i) => (
+            <div className={'wh' + (iso(dates[i]) === todayIso ? ' today' : '')} key={d}>
+              {d}<span className="dnum">{dates[i].getDate()}</span>
+            </div>
+          ))}
           <div className="timecol" style={{ height: colH }}>
             {hours.map(h => (
               <span className="hr" key={h} style={{ top: (h - minH) * PX_PER_HOUR }}>{h}:00</span>
@@ -461,12 +521,12 @@ function WeekView({ students, onOpen, onAddLesson }) {
           {DAYS.map((_, di) => {
             const dayItems = layoutLanes(lessons.filter(l => l.day === di))
             return (
-              <div className={'daycol' + (di === tIdx ? ' today' : '')} key={di} style={{ height: colH }}>
+              <div className={'daycol' + (iso(dates[di]) === todayIso ? ' today' : '')} key={di} style={{ height: colH }}>
                 {hours.slice(1).map(h => (
                   <div className="hline" key={h} style={{ top: (h - minH) * PX_PER_HOUR }} />
                 ))}
-                {dayItems.map((l, i) => (
-                  <div className="lesson" key={i}
+                {dayItems.map(l => (
+                  <div className="lesson" key={l.key + l.student.id}
                     role="button" tabIndex={0}
                     onClick={() => onOpen(l.student.id)}
                     onKeyDown={e => { if (e.key === 'Enter') onOpen(l.student.id) }}
@@ -478,7 +538,14 @@ function WeekView({ students, onOpen, onAddLesson }) {
                       '--stu': COLORS[l.student.colorIdx % COLORS.length],
                     }}>
                     <b>{l.student.name}</b>
-                    <span>{l.start}–{endTime(l.start, l.dur)}</span>
+                    <span>{l.start}–{endTime(l.start, l.dur)}{l.once ? ' · разовый' : ''}</span>
+                    <button
+                      className={'ltick' + (l.paid ? ' on' : '')}
+                      title={l.paid ? 'Урок оплачен — снять отметку' : 'Отметить: урок оплачен'}
+                      aria-label={'Оплата урока: ' + (l.paid ? 'отмечена' : 'не отмечена')}
+                      aria-pressed={l.paid}
+                      onClick={e => { e.stopPropagation(); onToggleMark(l.student, l.key) }}
+                    >✓</button>
                   </div>
                 ))}
               </div>
@@ -486,7 +553,7 @@ function WeekView({ students, onOpen, onAddLesson }) {
           })}
         </div>
       </div>
-      <p className="weeknote">Клик по уроку открывает профиль ученика.</p>
+      <p className="weeknote">Клик по уроку открывает профиль ученика, галочка на уроке — отметка «оплачено» для этой даты.</p>
     </>
   )
 }
@@ -505,10 +572,22 @@ function PaymentsView({ students, onOpen, onPay, onTick }) {
   return (
     <>
       <div className="stats">
-        <div className="stat"><b><CountUp to={students.length} duration={0.8} /></b><span>учеников</span></div>
-        <div className="stat"><b><CountUp to={lessonsWeek} duration={0.8} /></b><span>уроков в неделю</span></div>
-        <div className={'stat' + (waiting.length ? ' alert' : '')}><b><CountUp to={waiting.length} duration={0.8} /></b><span>ждут оплаты</span></div>
-        <div className="stat"><b><CountUp to={monthIncome} duration={1} separator=" " /> ₴</b><span>получено в этом месяце</span></div>
+        <div className="stat">
+          <span>Учеников</span>
+          <b><CountUp to={students.length} duration={0.8} /></b>
+        </div>
+        <div className="stat">
+          <span>Уроков в неделю</span>
+          <b><CountUp to={lessonsWeek} duration={0.8} /></b>
+        </div>
+        <div className={'stat' + (waiting.length ? ' alert' : '')}>
+          <span>Ждут оплаты</span>
+          <b><CountUp to={waiting.length} duration={0.8} /></b>
+        </div>
+        <div className="stat money">
+          <span>Получено в этом месяце</span>
+          <b><CountUp to={monthIncome} duration={1} separator=" " /> ₴</b>
+        </div>
       </div>
       <div className="table-wrap">
         <table className="pay">
@@ -522,19 +601,21 @@ function PaymentsView({ students, onOpen, onPay, onTick }) {
             {sorted.map(s => {
               const last = (s.payments || [])[(s.payments || []).length - 1]
               return (
-                <tr key={s.id}>
+                <tr key={s.id} className="rowlink" onClick={() => onOpen(s.id)}>
                   <td>
-                    <button className="btn ghost sm stu-cell" onClick={() => onOpen(s.id)}
-                      style={{ '--stu': COLORS[s.colorIdx % COLORS.length], color: 'var(--ink)' }}>
-                      <span className="dot" />{s.name}
-                    </button>
+                    <span className="stu-cell">
+                      <Ava student={s} size={28} />
+                      <span className="stu-name">{s.name}<small>{s.level} · {fmtMoney(s.rate)}/ур.</small></span>
+                    </span>
                   </td>
-                  <td><Tick student={s} onToggle={onTick} /></td>
+                  <td onClick={e => e.stopPropagation()}><Tick student={s} onToggle={onTick} /></td>
                   <td><Pill student={s} /></td>
-                  <td className="num">{fmtMoney(s.balance)}</td>
+                  <td className="num strong">{fmtMoney(s.balance)}</td>
                   <td className="num">{fmtMoney(s.rate)}</td>
-                  <td>{last ? fmtDate(last.date) + ' · ' + fmtMoney(last.amount) : '—'}</td>
-                  <td className="num"><button className="btn sm" onClick={() => onPay(s.id)}>+ Оплата</button></td>
+                  <td className="mutedcell">{last ? fmtDate(last.date) + ' · ' + fmtMoney(last.amount) : '—'}</td>
+                  <td className="num" onClick={e => e.stopPropagation()}>
+                    <button className="btn sm" onClick={() => onPay(s.id)}>+ Оплата</button>
+                  </td>
                 </tr>
               )
             })}
@@ -574,6 +655,7 @@ export default function App() {
   const [editing, setEditing] = useState(null) // null | 'new' | studentId
   const [payingId, setPayingId] = useState(null)
   const [addingLesson, setAddingLesson] = useState(false)
+  const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()))
   const { isDark, toggle } = useTheme()
 
   useEffect(() => { persist(data) }, [data])
@@ -630,9 +712,27 @@ export default function App() {
 
   const handleLessonAdd = f => {
     const s = byId(f.studentId)
-    if (s) save(s.id, { ...s, slots: [...(s.slots || []), { day: f.day, start: f.start, dur: f.dur }] })
+    if (s) {
+      if (f.weekly) {
+        const day = (new Date(f.date + 'T00:00').getDay() + 6) % 7
+        save(s.id, { ...s, slots: [...(s.slots || []), { day, start: f.start, dur: f.dur }] })
+      } else {
+        save(s.id, { ...s, extra: [...(s.extra || []), { date: f.date, start: f.start, dur: f.dur }] })
+      }
+      setWeekStart(mondayOf(new Date(f.date + 'T00:00')))
+    }
     setAddingLesson(false)
   }
+
+  const handleToggleMark = (s, key) => {
+    const marks = { ...(s.marks || {}) }
+    if (marks[key]) delete marks[key]
+    else marks[key] = true
+    save(s.id, { ...s, marks })
+  }
+
+  const handleRemoveExtra = (s, i) =>
+    save(s.id, { ...s, extra: (s.extra || []).filter((_, j) => j !== i) })
 
   const showTab = t => { setTab(t); setOpenId(null) }
 
@@ -670,6 +770,7 @@ export default function App() {
           onLessonDone={() => handleLessonDone(open)}
           onPay={() => setPayingId(open.id)}
           onTick={handleTick}
+          onRemoveExtra={i => handleRemoveExtra(open, i)}
         />
       )}
 
@@ -677,13 +778,25 @@ export default function App() {
         <FadeContent duration={400} threshold={0}>
           <div className="viewhead">
             <h2>Расписание недели</h2>
-            <span className="sub">все ученики</span>
+            <span className="sub">
+              {weekStart.getDate()} {MONTHS[weekStart.getMonth()]} — {addDays(weekStart, 6).getDate()} {MONTHS[addDays(weekStart, 6).getMonth()]} {addDays(weekStart, 6).getFullYear()}
+            </span>
             <span className="spacer" />
+            <div className="weeknav">
+              <button className="btn sm" onClick={() => setWeekStart(w => addDays(w, -7))} aria-label="Предыдущая неделя">←</button>
+              <button className="btn sm" onClick={() => setWeekStart(mondayOf(new Date()))}>Сегодня</button>
+              <button className="btn sm" onClick={() => setWeekStart(w => addDays(w, 7))} aria-label="Следующая неделя">→</button>
+              <input type="date" className="weekpick" value={iso(weekStart)}
+                onChange={e => e.target.value && setWeekStart(mondayOf(new Date(e.target.value + 'T00:00')))}
+                aria-label="Выбрать неделю по календарю" />
+            </div>
             {students.length > 0 && <button className="btn primary" onClick={() => setAddingLesson(true)}>+ Урок</button>}
           </div>
           <WeekView students={students}
+            weekStart={weekStart}
             onOpen={id => { setTab('students'); setOpenId(id) }}
-            onAddLesson={() => setAddingLesson(true)} />
+            onAddLesson={() => setAddingLesson(true)}
+            onToggleMark={handleToggleMark} />
         </FadeContent>
       )}
 
@@ -711,7 +824,11 @@ export default function App() {
 
       {paying && <PaymentForm student={paying} onSave={handlePaySave} onClose={() => setPayingId(null)} />}
 
-      {addingLesson && <LessonForm students={students} onSave={handleLessonAdd} onClose={() => setAddingLesson(false)} />}
+      {addingLesson && (
+        <LessonForm students={students}
+          defaultDate={iso(weekStart) === iso(mondayOf(new Date())) ? iso(new Date()) : iso(weekStart)}
+          onSave={handleLessonAdd} onClose={() => setAddingLesson(false)} />
+      )}
 
       <p className="storage-note">Данные хранятся в этом браузере. Ученики-примеры помечены «пример» — их можно удалить.</p>
     </div>
