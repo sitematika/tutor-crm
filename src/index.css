@@ -252,8 +252,10 @@ nav.tabs button.on { background: var(--accent); color: var(--accent-ink); }
   padding: 14px 18px 16px; box-shadow: var(--shadow);
   display: flex; flex-direction: column; gap: 6px;
 }
-.stat span { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; }
+.stat > span { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; }
 .stat b { font-size: 40px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.05; letter-spacing: -0.02em; }
+/* CountUp рендерит цифры в <span> — они наследуют размер числа, не подписи */
+.stat b span { font-size: inherit; color: inherit; font-weight: inherit; letter-spacing: inherit; text-transform: none; }
 .stat.alert b { color: var(--bad); }
 .stat.money b { color: var(--accent); }
 .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px; }
