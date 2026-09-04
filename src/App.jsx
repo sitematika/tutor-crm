@@ -43,18 +43,22 @@ const yearsWord = n => {
 const ageLabel = s => (s.age ? `${s.age} ${yearsWord(Number(s.age))}` : s.grade ? `${s.grade} кл.` : '')
 const lessonKey = l => l.date + '|' + l.start
 
-/* Статус оплаты: ручная галочка > денежный счёт */
+/* Статус оплаты — от счёта И от уроков: долг > предоплата > отметка
+   «оплачен» на ближайшем уроке / ручная галочка > ждёт оплаты */
 function payStatus(s) {
-  if (s.paidTick) return { k: 'paid', label: 'Оплачено ✓' }
   const b = s.balance || 0
   const rate = s.rate || 0
   if (b < 0) return { k: 'debt', label: 'Долг ' + fmtMoney(-b) }
   if (rate > 0 && b >= rate) return { k: 'paid', label: `Наперёд · ${Math.floor(b / rate)} ур.` }
+  const next = nextLessonInfo(s)
+  const nextPaid = next && (s.marks || {})[next.date + '|' + next.sl.start]
+  if (s.paidTick || nextPaid) return { k: 'paid', label: 'Оплачено ✓' }
   if (b > 0) return { k: 'due', label: 'Мало на счету' }
   return { k: 'due', label: 'Ждёт оплаты' }
 }
 
-function nextLesson(s) {
+/* Ближайший урок ученика (слот + конкретная дата) */
+function nextLessonInfo(s) {
   if (!s.slots || !s.slots.length) return null
   const now = new Date()
   const nowDay = todayIdx()
@@ -66,9 +70,14 @@ function nextLesson(s) {
     const score = delta * 1440 + toMin(sl.start)
     if (!best || score < best.score) best = { score, sl, delta }
   }
-  const { sl, delta } = best
-  const when = delta === 0 ? 'сегодня' : delta === 1 ? 'завтра' : DAYS[sl.day]
-  return `${when} в ${sl.start}`
+  return { ...best, date: iso(addDays(new Date(), best.delta)) }
+}
+
+function nextLesson(s) {
+  const n = nextLessonInfo(s)
+  if (!n) return null
+  const when = n.delta === 0 ? 'сегодня' : n.delta === 1 ? 'завтра' : DAYS[n.sl.day]
+  return `${when} в ${n.sl.start}`
 }
 
 /* ---------- API (сервер, когда рядом лежит api.php) ---------- */
@@ -149,6 +158,12 @@ const IcoSun = () => (
 const IcoMoon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+  </svg>
+)
+const IcoRefresh = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M23 4v6h-6" /><path d="M1 20v-6h6" />
+    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
   </svg>
 )
 const IcoOut = () => (
@@ -534,7 +549,7 @@ function ProfileView({ student: s, onBack, onEdit, onPay, onTick, onRemoveExtra,
           {payments.length
             ? payments.map((p, i) => (
                 <div className="payrow" key={i}>
-                  <span>{fmtDate(p.date)}</span>
+                  <span>{fmtDate(p.date)}{p.auto ? ' · за урок' : ''}</span>
                   <span className="amt">{fmtMoney(p.amount)}</span>
                 </div>
               ))
@@ -1034,6 +1049,8 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
       if (prevEntry.paidBy === 'tick') next.paidTick = true
       else if (prevEntry.paidBy !== 'mark') next.balance = (next.balance || 0) + (next.rate || 0)
     }
+    // авто-оплата «за урок» старой записи тоже убирается (вернётся ниже, если урок остаётся)
+    next.payments = (s.payments || []).filter(p => !(p.auto && p.lesson === lessonKey(lesson)))
 
     // домашка этого урока — отдельной записью со статусом «сделано/нет»
     const text = (hw || '').trim()
@@ -1050,9 +1067,14 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
       const willCharge = status === 'done' ? true : !!charge
       let paidBy
       if (willCharge) {
-        // урок с отметкой «оплачен» уже покрыт — счёт не трогаем
-        if ((s.marks || {})[lessonKey(lesson)]) paidBy = 'mark'
-        else if (next.paidTick) { paidBy = 'tick'; next.paidTick = false }
+        // урок с отметкой «оплачен» уже покрыт — счёт не трогаем,
+        // но оплата фиксируется в истории (и в сумме за месяц)
+        if ((s.marks || {})[lessonKey(lesson)]) {
+          paidBy = 'mark'
+          next.payments = [...next.payments, {
+            date: lesson.date, amount: next.rate || 0, lesson: lessonKey(lesson), auto: true,
+          }]
+        } else if (next.paidTick) { paidBy = 'tick'; next.paidTick = false }
         else { paidBy = 'balance'; next.balance = (next.balance || 0) - (next.rate || 0) }
       }
       next.log = [...next.log, {
@@ -1121,6 +1143,9 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
           <button className={tab === 'pay' ? 'on' : ''} onClick={() => showTab('pay')}>Оплаты</button>
         </nav>
         <div className="hdr-actions">
+          <button className="theme-btn" onClick={() => location.reload()} title="Обновить данные" aria-label="Обновить страницу и данные">
+            <IcoRefresh />
+          </button>
           <button className="theme-btn" onClick={toggle} title="Переключить тему" aria-label="Переключить светлую/тёмную тему">
             {isDark ? <IcoSun /> : <IcoMoon />}
           </button>
@@ -1406,6 +1431,9 @@ function StudentApp({ join }) {
         <span className="wordmark">A-teacher <em>CRM</em></span>
         <span className="spacer" style={{ flex: 1 }} />
         <div className="hdr-actions">
+          <button className="theme-btn" onClick={() => location.reload()} title="Обновить данные" aria-label="Обновить страницу и данные">
+            <IcoRefresh />
+          </button>
           <button className="theme-btn" onClick={toggle} title="Переключить тему" aria-label="Переключить светлую/тёмную тему">
             {isDark ? <IcoSun /> : <IcoMoon />}
           </button>
