@@ -1,0 +1,719 @@
+import { useState, useEffect, useMemo, useCallback } from 'react'
+import SpotlightCard from './reactbits/SpotlightCard.jsx'
+import CountUp from './reactbits/CountUp.jsx'
+import FadeContent from './reactbits/FadeContent.jsx'
+
+/* ---------- constants ---------- */
+const DAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+const LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
+const DURATIONS = [45, 60, 90]
+const COLORS = ['#4E79A7', '#B3623F', '#5F9E6E', '#8B6BB1', '#C2903A', '#3E8F8F', '#B15B7D', '#7A8450']
+const STORAGE_KEY = 'tutor-crm-students-v2'
+
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7)
+const todayIdx = () => (new Date().getDay() + 6) % 7 // 0 = Пн
+const toMin = t => { const [h, m] = (t || '0:0').split(':').map(Number); return h * 60 + m }
+const fmtMoney = n => (n || 0).toLocaleString('uk-UA') + ' ₴'
+const fmtDate = iso => (iso ? new Date(iso + 'T00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) : '—')
+const endTime = (start, dur) => {
+  const m = toMin(start) + dur
+  return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0')
+}
+
+/* Статус оплаты: ручная галочка > денежный счёт */
+function payStatus(s) {
+  if (s.paidTick) return { k: 'paid', label: 'Оплачено ✓' }
+  const b = s.balance || 0
+  const rate = s.rate || 0
+  if (b < 0) return { k: 'debt', label: 'Долг ' + fmtMoney(-b) }
+  if (rate > 0 && b >= rate) return { k: 'paid', label: `Наперёд · ${Math.floor(b / rate)} ур.` }
+  if (b > 0) return { k: 'due', label: 'Мало на счету' }
+  return { k: 'due', label: 'Ждёт оплаты' }
+}
+
+function nextLesson(s) {
+  if (!s.slots || !s.slots.length) return null
+  const now = new Date()
+  const nowDay = todayIdx()
+  const nowMin = now.getHours() * 60 + now.getMinutes()
+  let best = null
+  for (const sl of s.slots) {
+    let delta = (sl.day - nowDay + 7) % 7
+    if (delta === 0 && toMin(sl.start) <= nowMin) delta = 7
+    const score = delta * 1440 + toMin(sl.start)
+    if (!best || score < best.score) best = { score, sl, delta }
+  }
+  const { sl, delta } = best
+  const when = delta === 0 ? 'сегодня' : delta === 1 ? 'завтра' : DAYS[sl.day]
+  return `${when} в ${sl.start}`
+}
+
+/* ---------- демо-данные при первом запуске ---------- */
+const DEMO = {
+  'demo-anya': {
+    name: 'Аня Соколова', level: 'B1', rate: 500, contact: '@anya_s, +380 67 000 11 22',
+    notes: 'Готовится к IELTS (цель 6.5). Слабое место — listening.',
+    bookmark: 'Headway Intermediate, стр. 34', balance: 2500, paidTick: false, colorIdx: 0, demo: true,
+    slots: [{ day: 0, start: '16:00', dur: 60 }, { day: 3, start: '16:00', dur: 60 }],
+    payments: [{ date: '2026-08-28', amount: 4000 }],
+  },
+  'demo-maksim': {
+    name: 'Максим Орлов', level: 'A2', rate: 400, contact: '+380 50 333 44 55 (мама — Ольга)',
+    notes: 'Школьник, 7 класс. Подтягиваем грамматику: Present Perfect vs Past Simple.',
+    bookmark: 'Solutions Elementary, стр. 58', balance: 0, paidTick: true, colorIdx: 1, demo: true,
+    slots: [{ day: 1, start: '18:00', dur: 60 }, { day: 4, start: '18:00', dur: 60 }],
+    payments: [{ date: '2026-08-05', amount: 3200 }],
+  },
+  'demo-irina': {
+    name: 'Ирина Ковалёва', level: 'C1', rate: 700, contact: '@irina_kv',
+    notes: 'Business English: презентации и переговоры.',
+    bookmark: 'Market Leader Advanced, Unit 5', balance: -1400, paidTick: false, colorIdx: 2, demo: true,
+    slots: [{ day: 2, start: '19:30', dur: 90 }],
+    payments: [{ date: '2026-07-20', amount: 2800 }],
+  },
+  'demo-timur': {
+    name: 'Тимур Ахмедов', level: 'B2', rate: 600, contact: '+380 63 777 88 99',
+    notes: 'Разговорная практика + подготовка к собеседованиям в IT.',
+    bookmark: 'English Grammar in Use, Unit 42', balance: 1800, paidTick: false, colorIdx: 3, demo: true,
+    slots: [{ day: 1, start: '16:30', dur: 45 }, { day: 5, start: '11:00', dur: 90 }],
+    payments: [{ date: '2026-09-01', amount: 2400 }],
+  },
+  'demo-liza': {
+    name: 'Лиза Мельникова', level: 'A1', rate: 350, contact: '@liza_mel',
+    notes: 'Начинающая, академические часы по 45 минут.',
+    bookmark: 'English File Beginner, стр. 21', balance: 2100, paidTick: false, colorIdx: 4, demo: true,
+    slots: [{ day: 0, start: '10:00', dur: 45 }, { day: 2, start: '10:00', dur: 45 }],
+    payments: [{ date: '2026-09-02', amount: 2800 }],
+  },
+}
+
+/* ---------- storage (localStorage) ---------- */
+function loadData() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch { /* повреждённые данные — начинаем с демо */ }
+  return DEMO
+}
+function persist(data) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)) } catch { /* нет места — работаем в памяти */ }
+}
+
+/* ---------- small bits ---------- */
+function Pill({ student }) {
+  const st = payStatus(student)
+  return <span className={'pill ' + st.k}>{st.label}</span>
+}
+
+function Tick({ student, onToggle }) {
+  return (
+    <button
+      className={'tick' + (student.paidTick ? ' on' : '')}
+      title={student.paidTick ? 'Оплата отмечена — снять галочку' : 'Отметить: урок оплачен'}
+      aria-label={'Оплата: ' + (student.paidTick ? 'отмечена' : 'не отмечена')}
+      aria-pressed={!!student.paidTick}
+      onClick={e => { e.stopPropagation(); onToggle(student) }}
+    >✓</button>
+  )
+}
+
+function Modal({ title, onClose, children }) {
+  useEffect(() => {
+    const h = e => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [onClose])
+  return (
+    <div className="overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label={title}>
+        <h3>{title}</h3>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+/* ---------- student form ---------- */
+function StudentForm({ initial, onSave, onClose, onDelete }) {
+  const [f, setF] = useState(() => initial || {
+    name: '', level: 'B1', rate: 500, contact: '', notes: '', bookmark: '', balance: 0,
+    slots: [{ day: 0, start: '16:00', dur: 60 }],
+    payments: [], colorIdx: 0, paidTick: false,
+  })
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }))
+  const setSlot = (i, k, v) => setF(p => ({ ...p, slots: p.slots.map((s, j) => (j === i ? { ...s, [k]: v } : s)) }))
+
+  const submit = e => {
+    e.preventDefault()
+    if (!f.name.trim()) return
+    onSave({ ...f, name: f.name.trim(), rate: Number(f.rate) || 0, balance: Number(f.balance) || 0 })
+  }
+
+  return (
+    <Modal title={initial ? 'Редактировать ученика' : 'Новый ученик'} onClose={onClose}>
+      <form onSubmit={submit}>
+        <div className="field">
+          <label htmlFor="f-name">Имя</label>
+          <input id="f-name" value={f.name} onChange={e => set('name', e.target.value)} autoFocus required placeholder="Имя и фамилия" />
+        </div>
+        <div className="frow">
+          <div className="field">
+            <label htmlFor="f-level">Уровень (CEFR)</label>
+            <select id="f-level" value={f.level} onChange={e => set('level', e.target.value)}>
+              {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="f-rate">Ставка, ₴ / урок</label>
+            <input id="f-rate" type="number" min="0" step="50" value={f.rate} onChange={e => set('rate', e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="f-bal">На счету, ₴</label>
+            <input id="f-bal" type="number" step="50" value={f.balance} onChange={e => set('balance', e.target.value)} />
+          </div>
+        </div>
+        <div className="field">
+          <label htmlFor="f-contact">Контакт</label>
+          <input id="f-contact" value={f.contact} onChange={e => set('contact', e.target.value)} placeholder="Телефон, Telegram…" />
+        </div>
+        <div className="field">
+          <label htmlFor="f-bookmark">Где остановились</label>
+          <input id="f-bookmark" value={f.bookmark || ''} onChange={e => set('bookmark', e.target.value)} placeholder="Учебник, страница или юнит…" />
+        </div>
+        <div className="field">
+          <label>Расписание</label>
+          {f.slots.map((s, i) => (
+            <div className="slot-edit" key={i}>
+              <select className="day" value={s.day} aria-label="День недели" onChange={e => setSlot(i, 'day', Number(e.target.value))}>
+                {DAYS.map((d, j) => <option key={j} value={j}>{d}</option>)}
+              </select>
+              <input className="time" type="time" value={s.start} aria-label="Время начала" onChange={e => setSlot(i, 'start', e.target.value)} />
+              <select className="dur" value={s.dur} aria-label="Длительность" onChange={e => setSlot(i, 'dur', Number(e.target.value))}>
+                {DURATIONS.map(d => <option key={d} value={d}>{d} мин</option>)}
+              </select>
+              <button type="button" className="btn ghost sm" aria-label="Убрать слот"
+                onClick={() => setF(p => ({ ...p, slots: p.slots.filter((_, j) => j !== i) }))}>✕</button>
+            </div>
+          ))}
+          <button type="button" className="btn sm"
+            onClick={() => setF(p => ({ ...p, slots: [...p.slots, { day: 0, start: '16:00', dur: 60 }] }))}>
+            + слот
+          </button>
+        </div>
+        <div className="field">
+          <label htmlFor="f-notes">Заметки</label>
+          <textarea id="f-notes" value={f.notes} onChange={e => set('notes', e.target.value)} placeholder="Цели, слабые места…" />
+        </div>
+        <div className="mfoot">
+          {onDelete && <button type="button" className="btn danger left" onClick={onDelete}>Удалить</button>}
+          <button type="button" className="btn" onClick={onClose}>Отмена</button>
+          <button type="submit" className="btn primary">Сохранить</button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+/* ---------- payment form ---------- */
+function PaymentForm({ student, onSave, onClose }) {
+  const [amount, setAmount] = useState((student.rate || 0) * 4)
+  const submit = e => {
+    e.preventDefault()
+    const a = Number(amount) || 0
+    if (a <= 0) return
+    onSave({ date: new Date().toISOString().slice(0, 10), amount: a })
+  }
+  const lessons = student.rate > 0 ? Math.floor((Number(amount) || 0) / student.rate) : 0
+  return (
+    <Modal title={'Оплата — ' + student.name} onClose={onClose}>
+      <form onSubmit={submit}>
+        <div className="field">
+          <label htmlFor="p-amount">Сумма, ₴</label>
+          <input id="p-amount" type="number" min="50" step="50" value={amount} onChange={e => setAmount(e.target.value)} autoFocus />
+        </div>
+        {lessons > 0 && <p className="hint">≈ {lessons} ур. по ставке {fmtMoney(student.rate)}</p>}
+        <div className="mfoot">
+          <button type="button" className="btn" onClick={onClose}>Отмена</button>
+          <button type="submit" className="btn primary">Записать оплату</button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+/* ---------- lesson form (новый урок из сетки недели) ---------- */
+function LessonForm({ students, onSave, onClose }) {
+  const [f, setF] = useState({ studentId: students[0]?.id || '', day: todayIdx(), start: '16:00', dur: 60 })
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }))
+  const submit = e => {
+    e.preventDefault()
+    if (!f.studentId) return
+    onSave(f)
+  }
+  return (
+    <Modal title="Новый урок" onClose={onClose}>
+      <form onSubmit={submit}>
+        <div className="field">
+          <label htmlFor="l-stu">Ученик</label>
+          <select id="l-stu" value={f.studentId} onChange={e => set('studentId', e.target.value)} autoFocus>
+            {students.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </div>
+        <div className="frow">
+          <div className="field">
+            <label htmlFor="l-day">День</label>
+            <select id="l-day" value={f.day} onChange={e => set('day', Number(e.target.value))}>
+              {DAYS.map((d, j) => <option key={j} value={j}>{d}</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="l-start">Начало</label>
+            <input id="l-start" type="time" value={f.start} onChange={e => set('start', e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="l-dur">Длительность</label>
+            <select id="l-dur" value={f.dur} onChange={e => set('dur', Number(e.target.value))}>
+              {DURATIONS.map(d => <option key={d} value={d}>{d} мин</option>)}
+            </select>
+          </div>
+        </div>
+        <p className="hint">Урок добавится в еженедельное расписание ученика.</p>
+        <div className="mfoot">
+          <button type="button" className="btn" onClick={onClose}>Отмена</button>
+          <button type="submit" className="btn primary">Добавить урок</button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+/* ---------- students view ---------- */
+function StudentsView({ students, onOpen, onAdd, onTick }) {
+  if (!students.length) return (
+    <div className="empty">
+      <h3>Пока нет учеников</h3>
+      <p>Добавьте первого — с профилем, расписанием и счётом в гривнах.</p>
+      <button className="btn primary" onClick={onAdd}>+ Добавить ученика</button>
+    </div>
+  )
+  return (
+    <div className="cards">
+      {students.map(s => {
+        const next = nextLesson(s)
+        return (
+          <SpotlightCard key={s.id} className="stu-card" spotlightColor="var(--spot)">
+            <div role="button" tabIndex={0} style={{ display: 'contents' }}
+              onClick={() => onOpen(s.id)}
+              onKeyDown={e => { if (e.key === 'Enter') onOpen(s.id) }}>
+              <div className="name-row" style={{ '--stu': COLORS[s.colorIdx % COLORS.length] }}>
+                <span className="dot" />
+                <h3>{s.name}</h3>
+                <Tick student={s} onToggle={onTick} />
+                <span className="lvl">{s.level}</span>
+              </div>
+              <div className="meta">
+                <span>{next ? 'Следующий урок: ' + next : 'Расписание не задано'}</span>
+                {s.bookmark && <span className="bookmark">📖 {s.bookmark}</span>}
+                <span>{fmtMoney(s.rate)} / урок · на счету {fmtMoney(s.balance)}</span>
+              </div>
+              <div className="foot">
+                <Pill student={s} />
+                {s.demo && <span className="demo-tag">пример</span>}
+              </div>
+            </div>
+          </SpotlightCard>
+        )
+      })}
+    </div>
+  )
+}
+
+/* ---------- profile view ---------- */
+function ProfileView({ student: s, onBack, onEdit, onLessonDone, onPay, onTick }) {
+  const payments = (s.payments || []).slice().reverse()
+  const lessonsLeft = s.rate > 0 && s.balance > 0 ? Math.floor(s.balance / s.rate) : 0
+  return (
+    <div className="profile" style={{ '--stu': COLORS[s.colorIdx % COLORS.length] }}>
+      <div className="phead">
+        <span className="dot" />
+        <div>
+          <h2>{s.name}</h2>
+          <span className="sub">Уровень {s.level} · {fmtMoney(s.rate)} / урок</span>
+        </div>
+        <div className="actions">
+          <button className="btn" onClick={onBack}>← Ко всем</button>
+          <button className="btn" onClick={onEdit}>Редактировать</button>
+          <button className="btn" onClick={onLessonDone}>Урок проведён</button>
+          <button className="btn primary" onClick={onPay}>+ Оплата</button>
+        </div>
+      </div>
+      <div className="pbody">
+        <div className="pcol">
+          <h4>Расписание</h4>
+          {(s.slots || []).length
+            ? s.slots.slice().sort((a, b) => a.day - b.day || toMin(a.start) - toMin(b.start)).map((sl, i) => (
+                <div className="slot-line" key={i}>
+                  <span className="d">{DAYS[sl.day]}</span>
+                  <span>{sl.start}–{endTime(sl.start, sl.dur)}</span>
+                  <span className="t">{sl.dur} мин</span>
+                </div>
+              ))
+            : <p style={{ color: 'var(--muted)', margin: 0 }}>Слоты не заданы — добавьте в редактировании.</p>}
+          <h4>Где остановились</h4>
+          <p style={{ margin: 0 }}>{s.bookmark || '—'}</p>
+          <h4>Контакты и заметки</h4>
+          <dl className="kv">
+            <dt>Контакт</dt><dd>{s.contact || '—'}</dd>
+          </dl>
+          {s.notes ? <p className="notes-p">{s.notes}</p> : null}
+        </div>
+        <div className="pcol">
+          <h4>Оплата</h4>
+          <div className="balance-big">
+            <b>{fmtMoney(s.balance)}</b>
+            <span>{lessonsLeft > 0 ? `≈ ${lessonsLeft} ур. наперёд` : 'на счету'}</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Pill student={s} />
+            <Tick student={s} onToggle={onTick} />
+            <span style={{ color: 'var(--muted)', fontSize: 13 }}>урок оплачен отдельно</span>
+          </div>
+          <p className="hint">
+            «Урок проведён» снимает галочку, если она стоит, иначе списывает {fmtMoney(s.rate)} со счёта.
+          </p>
+          <h4>История оплат</h4>
+          {payments.length
+            ? payments.map((p, i) => (
+                <div className="payrow" key={i}>
+                  <span>{fmtDate(p.date)}</span>
+                  <span className="amt">{fmtMoney(p.amount)}</span>
+                </div>
+              ))
+            : <p style={{ color: 'var(--muted)', margin: 0 }}>Оплат ещё не было.</p>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ---------- week view ---------- */
+const PX_PER_HOUR = 60
+
+function layoutLanes(items) {
+  const sorted = items.slice().sort((a, b) => a.startMin - b.startMin)
+  const laneEnds = []
+  sorted.forEach(it => {
+    let li = laneEnds.findIndex(end => end <= it.startMin)
+    if (li === -1) { li = laneEnds.length; laneEnds.push(0) }
+    laneEnds[li] = it.startMin + it.dur
+    it.lane = li
+  })
+  sorted.forEach(it => { it.lanes = laneEnds.length })
+  return sorted
+}
+
+function WeekView({ students, onOpen, onAddLesson }) {
+  const lessons = useMemo(() =>
+    students.flatMap(s => (s.slots || []).map(sl => ({ ...sl, startMin: toMin(sl.start), student: s }))),
+    [students])
+
+  const [minH, maxH] = useMemo(() => {
+    if (!lessons.length) return [9, 20]
+    const lo = Math.min(...lessons.map(l => Math.floor(l.startMin / 60)))
+    const hi = Math.max(...lessons.map(l => Math.ceil((l.startMin + l.dur) / 60)))
+    return [Math.max(0, lo), Math.min(24, hi)]
+  }, [lessons])
+
+  const hours = []
+  for (let h = minH; h <= maxH; h++) hours.push(h)
+  const colH = (maxH - minH) * PX_PER_HOUR
+  const tIdx = todayIdx()
+  const monday = new Date()
+  monday.setDate(monday.getDate() - tIdx)
+
+  if (!lessons.length) return (
+    <div className="empty">
+      <h3>Неделя пуста</h3>
+      <p>Добавьте урок — здесь появится общая сетка всех учеников.</p>
+      {students.length > 0 && <button className="btn primary" onClick={onAddLesson}>+ Урок</button>}
+    </div>
+  )
+
+  return (
+    <>
+      <div className="week-wrap">
+        <div className="week">
+          <div className="wh" aria-hidden="true"></div>
+          {DAYS.map((d, i) => {
+            const date = new Date(monday)
+            date.setDate(monday.getDate() + i)
+            return (
+              <div className={'wh' + (i === tIdx ? ' today' : '')} key={d}>
+                {d}<span className="dnum">{date.getDate()}</span>
+              </div>
+            )
+          })}
+          <div className="timecol" style={{ height: colH }}>
+            {hours.map(h => (
+              <span className="hr" key={h} style={{ top: (h - minH) * PX_PER_HOUR }}>{h}:00</span>
+            ))}
+          </div>
+          {DAYS.map((_, di) => {
+            const dayItems = layoutLanes(lessons.filter(l => l.day === di))
+            return (
+              <div className={'daycol' + (di === tIdx ? ' today' : '')} key={di} style={{ height: colH }}>
+                {hours.slice(1).map(h => (
+                  <div className="hline" key={h} style={{ top: (h - minH) * PX_PER_HOUR }} />
+                ))}
+                {dayItems.map((l, i) => (
+                  <div className="lesson" key={i}
+                    role="button" tabIndex={0}
+                    onClick={() => onOpen(l.student.id)}
+                    onKeyDown={e => { if (e.key === 'Enter') onOpen(l.student.id) }}
+                    style={{
+                      top: (l.startMin - minH * 60) / 60 * PX_PER_HOUR + 1,
+                      height: l.dur / 60 * PX_PER_HOUR - 3,
+                      left: `calc(${(100 / l.lanes) * l.lane}% + 3px)`,
+                      width: `calc(${100 / l.lanes}% - 6px)`,
+                      '--stu': COLORS[l.student.colorIdx % COLORS.length],
+                    }}>
+                    <b>{l.student.name}</b>
+                    <span>{l.start}–{endTime(l.start, l.dur)}</span>
+                  </div>
+                ))}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+      <p className="weeknote">Клик по уроку открывает профиль ученика.</p>
+    </>
+  )
+}
+
+/* ---------- payments view ---------- */
+function PaymentsView({ students, onOpen, onPay, onTick }) {
+  const waiting = students.filter(s => payStatus(s).k !== 'paid')
+  const lessonsWeek = students.reduce((n, s) => n + (s.slots || []).length, 0)
+  const thisMonth = new Date().toISOString().slice(0, 7)
+  const monthIncome = students.reduce((sum, s) =>
+    sum + (s.payments || []).filter(p => p.date && p.date.slice(0, 7) === thisMonth)
+      .reduce((a, p) => a + (p.amount || 0), 0), 0)
+
+  const sorted = students.slice().sort((a, b) => (a.balance || 0) - (b.balance || 0))
+
+  return (
+    <>
+      <div className="stats">
+        <div className="stat"><b><CountUp to={students.length} duration={0.8} /></b><span>учеников</span></div>
+        <div className="stat"><b><CountUp to={lessonsWeek} duration={0.8} /></b><span>уроков в неделю</span></div>
+        <div className={'stat' + (waiting.length ? ' alert' : '')}><b><CountUp to={waiting.length} duration={0.8} /></b><span>ждут оплаты</span></div>
+        <div className="stat"><b><CountUp to={monthIncome} duration={1} separator=" " /> ₴</b><span>получено в этом месяце</span></div>
+      </div>
+      <div className="table-wrap">
+        <table className="pay">
+          <thead>
+            <tr>
+              <th>Ученик</th><th>Оплачен</th><th>Статус</th><th className="num">На счету</th>
+              <th className="num">Ставка</th><th>Последняя оплата</th><th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map(s => {
+              const last = (s.payments || [])[(s.payments || []).length - 1]
+              return (
+                <tr key={s.id}>
+                  <td>
+                    <button className="btn ghost sm stu-cell" onClick={() => onOpen(s.id)}
+                      style={{ '--stu': COLORS[s.colorIdx % COLORS.length], color: 'var(--ink)' }}>
+                      <span className="dot" />{s.name}
+                    </button>
+                  </td>
+                  <td><Tick student={s} onToggle={onTick} /></td>
+                  <td><Pill student={s} /></td>
+                  <td className="num">{fmtMoney(s.balance)}</td>
+                  <td className="num">{fmtMoney(s.rate)}</td>
+                  <td>{last ? fmtDate(last.date) + ' · ' + fmtMoney(last.amount) : '—'}</td>
+                  <td className="num"><button className="btn sm" onClick={() => onPay(s.id)}>+ Оплата</button></td>
+                </tr>
+              )
+            })}
+            {!sorted.length && (
+              <tr><td colSpan="7" style={{ color: 'var(--muted)', textAlign: 'center', padding: 28 }}>
+                Добавьте учеников — статусы оплат появятся здесь.
+              </td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </>
+  )
+}
+
+/* ---------- theme toggle ---------- */
+function useTheme() {
+  const [theme, setTheme] = useState(() => document.documentElement.dataset.theme || 'system')
+  const toggle = () => {
+    const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+    const isDark = theme === 'dark' || (theme === 'system' && systemDark)
+    const next = isDark ? 'light' : 'dark'
+    document.documentElement.dataset.theme = next
+    try { localStorage.setItem('tutor-crm-theme', next) } catch { /* приватный режим */ }
+    setTheme(next)
+  }
+  const systemDark = typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches
+  const isDark = theme === 'dark' || (theme === 'system' && systemDark)
+  return { isDark, toggle }
+}
+
+/* ---------- app ---------- */
+export default function App() {
+  const [data, setData] = useState(loadData)
+  const [tab, setTab] = useState('students')
+  const [openId, setOpenId] = useState(null)
+  const [editing, setEditing] = useState(null) // null | 'new' | studentId
+  const [payingId, setPayingId] = useState(null)
+  const [addingLesson, setAddingLesson] = useState(false)
+  const { isDark, toggle } = useTheme()
+
+  useEffect(() => { persist(data) }, [data])
+
+  const students = useMemo(() =>
+    Object.entries(data).map(([id, s]) => ({ ...s, id }))
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru')),
+    [data])
+
+  const byId = id => students.find(s => s.id === id)
+  const open = byId(openId)
+  const paying = byId(payingId)
+
+  const save = useCallback((id, s) => {
+    const { id: _drop, ...body } = s
+    setData(d => ({ ...d, [id]: body }))
+  }, [])
+
+  const handleFormSave = form => {
+    if (editing === 'new') {
+      const id = uid()
+      const used = students.map(s => s.colorIdx % COLORS.length)
+      let colorIdx = 0
+      while (used.includes(colorIdx) && colorIdx < COLORS.length) colorIdx++
+      save(id, { ...form, colorIdx: colorIdx % COLORS.length, createdAt: new Date().toISOString() })
+      setOpenId(id)
+    } else {
+      const prev = byId(editing)
+      const { demo: _demo, ...rest } = { ...prev, ...form } // ручное сохранение снимает метку «пример»
+      save(editing, rest)
+    }
+    setEditing(null)
+  }
+
+  const handleDelete = () => {
+    if (!confirm('Удалить ученика вместе с историей оплат?')) return
+    setData(d => { const c = { ...d }; delete c[editing]; return c })
+    setEditing(null)
+    setOpenId(null)
+  }
+
+  const handleTick = s => save(s.id, { ...s, paidTick: !s.paidTick })
+
+  const handleLessonDone = s => {
+    if (s.paidTick) save(s.id, { ...s, paidTick: false })
+    else save(s.id, { ...s, balance: (s.balance || 0) - (s.rate || 0) })
+  }
+
+  const handlePaySave = p => {
+    const s = paying
+    save(s.id, { ...s, balance: (s.balance || 0) + p.amount, payments: [...(s.payments || []), p] })
+    setPayingId(null)
+  }
+
+  const handleLessonAdd = f => {
+    const s = byId(f.studentId)
+    if (s) save(s.id, { ...s, slots: [...(s.slots || []), { day: f.day, start: f.start, dur: f.dur }] })
+    setAddingLesson(false)
+  }
+
+  const showTab = t => { setTab(t); setOpenId(null) }
+
+  return (
+    <div className="app">
+      <header className="top">
+        <span className="wordmark">Кабинет <em>репетитора</em></span>
+        <nav className="tabs" aria-label="Разделы">
+          <button className={tab === 'students' ? 'on' : ''} onClick={() => showTab('students')}>Ученики</button>
+          <button className={tab === 'week' ? 'on' : ''} onClick={() => showTab('week')}>Неделя</button>
+          <button className={tab === 'pay' ? 'on' : ''} onClick={() => showTab('pay')}>Оплаты</button>
+        </nav>
+        <button className="theme-btn" onClick={toggle} title="Переключить тему" aria-label="Переключить светлую/тёмную тему">
+          {isDark ? '☀️' : '🌙'}
+        </button>
+      </header>
+
+      {tab === 'students' && !open && (
+        <FadeContent duration={400} threshold={0}>
+          <div className="viewhead">
+            <h2>Ученики</h2>
+            <span className="sub">{students.length ? students.length + ' чел.' : ''}</span>
+            <span className="spacer" />
+            <button className="btn primary" onClick={() => setEditing('new')}>+ Ученик</button>
+          </div>
+          <StudentsView students={students} onOpen={setOpenId} onAdd={() => setEditing('new')} onTick={handleTick} />
+        </FadeContent>
+      )}
+
+      {tab === 'students' && open && (
+        <ProfileView
+          student={open}
+          onBack={() => setOpenId(null)}
+          onEdit={() => setEditing(open.id)}
+          onLessonDone={() => handleLessonDone(open)}
+          onPay={() => setPayingId(open.id)}
+          onTick={handleTick}
+        />
+      )}
+
+      {tab === 'week' && (
+        <FadeContent duration={400} threshold={0}>
+          <div className="viewhead">
+            <h2>Расписание недели</h2>
+            <span className="sub">все ученики</span>
+            <span className="spacer" />
+            {students.length > 0 && <button className="btn primary" onClick={() => setAddingLesson(true)}>+ Урок</button>}
+          </div>
+          <WeekView students={students}
+            onOpen={id => { setTab('students'); setOpenId(id) }}
+            onAddLesson={() => setAddingLesson(true)} />
+        </FadeContent>
+      )}
+
+      {tab === 'pay' && (
+        <FadeContent duration={400} threshold={0}>
+          <div className="viewhead">
+            <h2>Оплаты</h2>
+            <span className="sub">в гривнах</span>
+          </div>
+          <PaymentsView students={students}
+            onOpen={id => { setTab('students'); setOpenId(id) }}
+            onPay={setPayingId}
+            onTick={handleTick} />
+        </FadeContent>
+      )}
+
+      {editing && (
+        <StudentForm
+          initial={editing === 'new' ? null : byId(editing)}
+          onSave={handleFormSave}
+          onClose={() => setEditing(null)}
+          onDelete={editing !== 'new' ? handleDelete : null}
+        />
+      )}
+
+      {paying && <PaymentForm student={paying} onSave={handlePaySave} onClose={() => setPayingId(null)} />}
+
+      {addingLesson && <LessonForm students={students} onSave={handleLessonAdd} onClose={() => setAddingLesson(false)} />}
+
+      <p className="storage-note">Данные хранятся в этом браузере. Ученики-примеры помечены «пример» — их можно удалить.</p>
+    </div>
+  )
+}
