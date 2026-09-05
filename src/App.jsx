@@ -48,6 +48,12 @@ const ageLabel = s => {
   return parts.join(' · ')
 }
 const lessonKey = l => l.date + '|' + l.start
+/* Актуальная закладка = запись «где остановились» из самого свежего урока */
+const currentBookmark = s => {
+  const e = (s.log || []).filter(x => x.book)
+    .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start)).pop()
+  return e ? e.book : (s.bookmark || '')
+}
 
 /* Бухгалтерия: баланс не хранится как «плюс-минус», а всегда пересчитывается
    из записей — база (adjust) + все оплаты − все списания за уроки. Любая
@@ -851,8 +857,12 @@ function LessonDialog({ student: s, lesson, onSave, onOpenProfile, onToggleMark,
   // домашка, заданная именно на этом уроке (если окно открыли повторно)
   const ownHw = (s.homeworks || []).find(h => h.date === lesson.date)
   const [hw, setHw] = useState(ownHw ? ownHw.text : '')
-  // прогресс: где остановились на этом уроке (заранее подставляем текущую закладку)
-  const [bm, setBm] = useState(prevEntry && prevEntry.book != null ? prevEntry.book : s.bookmark || '')
+  // прогресс: у каждого урока своя запись — для нового урока поле пустое
+  const [bm, setBm] = useState(prevEntry && prevEntry.book != null ? prevEntry.book : '')
+  // где остановились в прошлый раз (уроки до этого)
+  const lastBook = (s.log || [])
+    .filter(e => e.book && (e.date + e.start) < (lesson.date + lesson.start))
+    .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start)).pop()
   // последняя домашка с прошлых уроков — проверить «сделано»
   const prevHw = (s.homeworks || []).filter(h => h.date !== lesson.date).slice(-1)[0]
   const paid = !!((s.marks || {})[lesson.key])
@@ -908,9 +918,10 @@ function LessonDialog({ student: s, lesson, onSave, onOpenProfile, onToggleMark,
           </div>
         )}
         <div className="field" style={{ marginTop: 10 }}>
-          <label htmlFor="ld-bm">Где остановились</label>
+          <label htmlFor="ld-bm">Где остановились на этом уроке</label>
           <input id="ld-bm" value={bm} onChange={e => setBm(e.target.value)}
             placeholder="Учебник, страница или юнит…" />
+          {lastBook && <p className="hint">Прошлый раз ({fmtDate(lastBook.date)}): {lastBook.book}</p>}
         </div>
         <div className="field">
           <label htmlFor="ld-hw">Домашнее задание на следующий урок</label>
@@ -1264,7 +1275,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
   const handleLessonDialogSave = ({ lesson, status, prevEntry, hw, charge, bm }) => {
     const s = byId(lessonDlg.studentId)
     if (!s) { setLessonDlg(null); return }
-    const next = { ...s, bookmark: (bm || '').trim() }
+    const next = { ...s }
     const isEntry = e => e.date === lesson.date && e.start === lesson.start
 
     // старая запись убирается — её списание уйдёт из пересчёта само
@@ -1294,6 +1305,8 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
       }]
     }
 
+    // общая закладка профиля/кабинета = запись из самого свежего урока
+    next.bookmark = currentBookmark(next)
     save(s.id, withLedger(next))
     setLessonDlg(null)
   }
