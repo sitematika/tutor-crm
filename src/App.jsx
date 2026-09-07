@@ -730,6 +730,7 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
       const cancelled = !!entry && entry.kind === 'cancelled'
       return {
         ...l, key, paid, done, cancelled,
+        covered: !!(entry && entry.covered),
         autoPaid: !paid && !done && !cancelled && autoPaid.get(l.student.id).has(key),
       }
     })
@@ -817,13 +818,15 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
                         onClick={e => { e.stopPropagation(); onToggleDone(l.student, l) }}
                       >✓</button>
                       <button
-                        className={'ltick green' + (l.paid || l.autoPaid ? ' on' : '')}
-                        disabled={l.autoPaid}
-                        title={l.autoPaid
-                          ? 'Оплачено предоплатой с баланса — спишется при проведении'
-                          : l.paid ? 'Урок оплачен — снять (уберёт зачисление)' : 'Урок оплачен (+ставка на счёт)'}
-                        aria-label={'Урок оплачен: ' + (l.paid || l.autoPaid ? 'да' : 'нет')}
-                        aria-pressed={l.paid || l.autoPaid}
+                        className={'ltick green' + (l.paid || l.autoPaid || l.covered ? ' on' : '')}
+                        disabled={l.autoPaid || l.covered}
+                        title={l.covered
+                          ? 'Оплачен предоплатой со счёта (урок проведён)'
+                          : l.autoPaid
+                            ? 'Оплачено предоплатой с баланса — спишется при проведении'
+                            : l.paid ? 'Урок оплачен — снять (уберёт зачисление)' : 'Урок оплачен (+ставка на счёт)'}
+                        aria-label={'Урок оплачен: ' + (l.paid || l.autoPaid || l.covered ? 'да' : 'нет')}
+                        aria-pressed={l.paid || l.autoPaid || l.covered}
                         onClick={e => { e.stopPropagation(); onToggleMark(l.student, l.key) }}
                       >✓</button>
                     </span>
@@ -1208,6 +1211,8 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
 
   // серверный режим: загрузка при входе, сохранение с задержкой после изменений
   const skipNextSave = useRef(true)
+  const dataRef = useRef(null)
+  const dirtyRef = useRef(false)
   useEffect(() => {
     if (mode !== 'server') return
     api('get', { token })
@@ -1218,14 +1223,46 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
 
   useEffect(() => {
     if (data === null) return
+    dataRef.current = data
     if (mode !== 'server') { persist(data); return }
     if (skipNextSave.current) { skipNextSave.current = false; return }
+    dirtyRef.current = true
     const t = setTimeout(() => {
-      api('save', { token, data }).catch(e => { if (e.status === 401) onAuthFail() })
+      api('save', { token, data })
+        .then(() => { dirtyRef.current = false })
+        .catch(e => { if (e.status === 401) onAuthFail() })
     }, 600)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data])
+
+  // при сворачивании/закрытии — мгновенно дослать несохранённое;
+  // при возврате на вкладку — подтянуть свежие данные с сервера
+  useEffect(() => {
+    if (mode !== 'server') return
+    const flush = () => {
+      if (!dirtyRef.current || !dataRef.current) return
+      try {
+        navigator.sendBeacon('api.php?action=save',
+          new Blob([JSON.stringify({ token, data: dataRef.current })], { type: 'application/json' }))
+        dirtyRef.current = false
+      } catch { /* нет поддержки — сработает обычное сохранение */ }
+    }
+    const onVis = () => {
+      if (document.visibilityState === 'hidden') { flush(); return }
+      if (dirtyRef.current) return // свои несохранённые правки важнее
+      api('get', { token })
+        .then(r => { skipNextSave.current = true; setData(r.data && typeof r.data === 'object' ? r.data : {}) })
+        .catch(() => {})
+    }
+    window.addEventListener('pagehide', flush)
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      document.removeEventListener('visibilitychange', onVis)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const students = useMemo(() =>
     Object.entries(data || {}).map(([id, s]) => ({ ...withLedger(s), id }))
@@ -1300,6 +1337,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
         kind: status, charged: willCharge,
         paidBy: willCharge ? 'balance' : undefined,
         amount: willCharge ? (next.rate || 0) : undefined,
+        covered: (willCharge && lesson.autoPaid) || undefined,
         hw: text || undefined,
         book: (bm || '').trim() || undefined,
       }]
@@ -1368,6 +1406,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
       next.log = [...(s.log || []), {
         date: lesson.date, start: lesson.start, dur: lesson.dur, type: lesson.type,
         kind: 'done', charged: true, paidBy: 'balance', amount: next.rate || 0,
+        covered: lesson.autoPaid || undefined, // был покрыт предоплатой — галочка «оплачен» остаётся
       }]
     }
     save(s.id, withLedger(next))
