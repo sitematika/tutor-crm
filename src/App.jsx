@@ -846,11 +846,65 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
 
   if (!lessons.length) return (
     <div className="empty">
-      <h3>На этой неделе уроков нет</h3>
-      <p>Добавьте урок или перелистните неделю стрелками выше.</p>
+      <h3>{dates.length === 1 ? 'В этот день уроков нет' : 'На этой неделе уроков нет'}</h3>
+      <p>Добавьте урок или перелистните стрелками выше.</p>
       {students.length > 0 && <button className="btn primary" onClick={onAddLesson}>+ Урок</button>}
     </div>
   )
+
+  // режим «День»: детальный список — кто, бюджет, где остановились, домашка, отметки
+  if (dates.length === 1) {
+    const day = lessons.slice().sort((a, b) => a.startMin - b.startMin)
+    return (
+      <>
+        <div className="agenda">
+          {day.map(l => {
+            const s = l.student
+            const lastHw = (s.homeworks || []).slice(-1)[0]
+            const book = currentBookmark(s)
+            return (
+              <div className={'agcard' + (l.done ? ' isdone' : '') + (l.cancelled ? ' iscancel' : '')}
+                key={l.key + s.id} role="button" tabIndex={0}
+                onClick={() => onLessonClick(l)}
+                onKeyDown={e => { if (e.key === 'Enter') onLessonClick(l) }}>
+                <div className="agtime">
+                  <b>{l.start}</b>
+                  <span>{endTime(l.start, l.dur)}</span>
+                  <span className="agdur">{l.dur} мин</span>
+                </div>
+                <div className="agbody">
+                  <div className="agname">
+                    <Ava student={s} size={28} />
+                    <b>{s.name}</b>
+                    <span className="lvl">{s.level}{ageLabel(s) ? ` · ${ageLabel(s)}` : ''}</span>
+                    {l.type && <span className="lvl">{l.type}</span>}
+                    {l.moved && <span className="lvl">перенесён</span>}
+                    {l.once && <span className="lvl">разовый</span>}
+                    {l.cancelled && <span className="lvl">отменён</span>}
+                  </div>
+                  <div className="agmoney">
+                    <Pill student={s} />
+                    <span>на счету {fmtMoney(s.balance)} · {fmtMoney(s.rate)} / урок</span>
+                  </div>
+                  <div className="agline">📖 {book ? `Остановились: ${book}` : 'Прогресс ещё не отмечали'}</div>
+                  {lastHw && <div className="agline">ДЗ: {lastHw.text}{lastHw.done ? ' · сделано ✓' : ''}</div>}
+                </div>
+                <div className="agticks" onClick={e => e.stopPropagation()}>
+                  <button type="button" className={'agtick blue' + (l.done ? ' on' : '')}
+                    onClick={() => onToggleDone(s, l)}>✓ Проведён</button>
+                  <button type="button" className={'agtick green' + (l.paid || l.autoPaid || l.covered ? ' on' : '')}
+                    disabled={(l.autoPaid || l.covered) && !l.paid}
+                    title={l.autoPaid ? 'Покрыт предоплатой со счёта' : ''}
+                    onClick={() => onToggleMark(s, l.key)}>✓ Оплачен</button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        <p className="weeknote">Нажмите на карточку — окно урока (отмена, домашка, прогресс, перенос). Время местное.</p>
+      </>
+    )
+  }
 
   return (
     <>
