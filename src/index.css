@@ -243,6 +243,11 @@ nav.tabs button.on { background: var(--accent); color: var(--accent-ink); }
 .daycol { position: relative; border-left: 1px solid var(--line); }
 .daycol.today { background: var(--accent-soft); }
 .hline { position: absolute; left: 0; right: 0; border-top: 1px solid var(--line); opacity: 0.55; }
+.nowline { position: absolute; left: 0; right: 0; border-top: 2px solid #EF4444; z-index: 2; pointer-events: none; }
+.nowline::before {
+  content: ""; position: absolute; left: -1px; top: -5px;
+  width: 8px; height: 8px; border-radius: 50%; background: #EF4444;
+}
 .lesson {
   position: absolute; border-radius: 7px; padding: 3px 7px; overflow: hidden;
   background: color-mix(in oklab, var(--stu) 16%, var(--surface));

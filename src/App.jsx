@@ -73,7 +73,12 @@ const currentBookmark = s => {
    галочка добавляет/убирает запись, значения сходятся из реального статуса. */
 const sumPayments = s => (s.payments || []).reduce((a, p) => a + (p.amount || 0), 0)
 const sumCharges = s => (s.log || [])
-  .filter(e => e.charged !== false && (e.paidBy === 'balance' || e.paidBy == null))
+  .filter(e => e.charged !== false && (
+    e.paidBy === 'balance' || e.paidBy == null ||
+    // ранние записи «оплачен галочкой»: считаются списанием, если по ним
+    // была записана авто-оплата (взаимно гасятся — счёт сходится)
+    (e.paidBy === 'mark' && (s.payments || []).some(p => p.auto && p.lesson === e.date + '|' + e.start))
+  ))
   .reduce((a, e) => a + (e.amount != null ? e.amount : (s.rate || 0)), 0)
 const withLedger = s => {
   const adjust = s.adjust != null ? s.adjust : (s.balance || 0) - sumPayments(s) + sumCharges(s)
@@ -666,6 +671,10 @@ function ProfileView({ student: s, onBack, onEdit, onPay, onTick, onRemoveExtra,
             <b>{fmtMoney(s.balance)}</b>
             <span>{lessonsLeft > 0 ? `≈ ${lessonsLeft} ур. наперёд` : 'на счету'}</span>
           </div>
+          <p className="hint" style={{ margin: '0 0 6px' }}>
+            Оплаты {fmtMoney(sumPayments(s))} · Списания {fmtMoney(sumCharges(s))}
+            {s.adjust ? ` · База ${fmtMoney(s.adjust)}` : ''}
+          </p>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <Pill student={s} />
             <Tick student={s} onToggle={onTick} />
@@ -724,6 +733,13 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
   const todayIso = iso(nowDate())
   // на телефоне показываем только диапазон часов, где есть уроки
   const compact = typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches
+  // линия «сейчас» — обновляется раз в минуту, живёт в выбранном часовом поясе
+  const [, tickNow] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => tickNow(t => t + 1), 60000)
+    return () => clearInterval(id)
+  }, [])
+  const nowM = nowDate().getHours() * 60 + nowDate().getMinutes()
 
   const autoPaid = useMemo(() => {
     const m = new Map()
@@ -798,7 +814,7 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
   for (let h = minH; h <= maxH; h++) hours.push(h)
   // на телефоне час выше — в блок урока влезает вся информация,
   // а сам календарь скроллится по вертикали
-  const pxh = compact ? 78 : PX_PER_HOUR
+  const pxh = compact ? 112 : PX_PER_HOUR
   const colH = (maxH - minH) * pxh
 
   if (!lessons.length) return (
@@ -834,6 +850,9 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
                 {hours.slice(1).map(h => (
                   <div className="hline" key={h} style={{ top: (h - minH) * pxh }} />
                 ))}
+                {iso(dates[di]) === todayIso && nowM >= minH * 60 && nowM <= maxH * 60 && (
+                  <div className="nowline" style={{ top: (nowM - minH * 60) / 60 * pxh }} />
+                )}
                 {dayItems.map(l => (
                   <div className={'lesson' + (l.type === 'Пробный' ? ' trial' : '') + (l.done ? ' isdone' : '') + (l.cancelled ? ' iscancel' : '') + (l.dur < 45 ? ' shortl' : '')} key={l.key + l.student.id}
                     role="button" tabIndex={0}
@@ -841,7 +860,7 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
                     onKeyDown={e => { if (e.key === 'Enter') onLessonClick(l) }}
                     style={{
                       top: (l.startMin - minH * 60) / 60 * pxh + 1,
-                      height: l.dur / 60 * pxh - 3,
+                      height: Math.max(l.dur / 60 * pxh - 3, compact ? 52 : 0),
                       left: `calc(${(100 / l.lanes) * l.lane}% + 3px)`,
                       width: `calc(${100 / l.lanes}% - 6px)`,
                       '--stu': COLORS[l.student.colorIdx % COLORS.length],
