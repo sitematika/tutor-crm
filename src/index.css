@@ -462,6 +462,7 @@ table.pay td.mutedcell { color: var(--muted); }
 
 .storage-note { color: var(--muted); font-size: 12.5px; margin-top: 28px; text-align: center; }
 .storage-note.tzline { margin-top: 8px; }
+.localnote { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .tzline select {
   border: 1px solid var(--line); border-radius: 8px; background: var(--field);
   color: var(--ink); padding: 4px 8px; font-size: 12.5px; max-width: 240px;

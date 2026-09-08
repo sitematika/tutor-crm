@@ -24,7 +24,53 @@ const nowDate = () => {
   try { return new Date(new Date().toLocaleString('en-US', { timeZone: APP_TZ })) } catch { return new Date() }
 }
 
-const todayIdx = () => (nowDate().getDay() + 6) % 7 // 0 = Пн
+/* Пояс, в котором ВЕДЁТСЯ расписание (время уроков хранится в нём).
+   По умолчанию Варшава; хранится в данных (_settings) — общий для всех устройств.
+   На экране время пересчитывается в местный пояс (устройство или выбранный). */
+let SCHED_TZ = 'Europe/Warsaw'
+const localTz = () => APP_TZ || deviceTz || 'UTC'
+const schedNow = () => {
+  try { return new Date(new Date().toLocaleString('en-US', { timeZone: SCHED_TZ })) } catch { return new Date() }
+}
+const tzParts = (ms, tz) => {
+  const p = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+  }).formatToParts(new Date(ms))
+  const g = t => Number(p.find(x => x.type === t).value)
+  return { y: g('year'), m: g('month'), d: g('day'), hh: g('hour') % 24, mm: g('minute') }
+}
+const tzOffsetMin = (ms, tz) => {
+  const q = tzParts(ms, tz)
+  return Math.round((Date.UTC(q.y, q.m - 1, q.d, q.hh, q.mm) - Math.floor(ms / 60000) * 60000) / 60000)
+}
+/* «дата+время на часах пояса tz» → абсолютный момент (мс) */
+const zonedToUtc = (date, time, tz) => {
+  const [y, m, d] = date.split('-').map(Number)
+  const [hh, mm] = time.split(':').map(Number)
+  const base = Date.UTC(y, m - 1, d, hh, mm)
+  let ms = base
+  for (let i = 0; i < 2; i++) { try { ms = base - tzOffsetMin(ms, tz) * 60000 } catch { return base } }
+  return ms
+}
+const hm = min => { const t = ((min % 1440) + 1440) % 1440; return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0') }
+/* время урока (в поясе расписания) → местное: {date, time, min, same} */
+const toLocal = (date, time) => {
+  const same = { date, time, min: toMin(time), same: true }
+  if (!SCHED_TZ || SCHED_TZ === localTz()) return same
+  try {
+    const q = tzParts(zonedToUtc(date, time, SCHED_TZ), localTz())
+    const ld = `${q.y}-${String(q.m).padStart(2, '0')}-${String(q.d).padStart(2, '0')}`
+    const lt = hm(q.hh * 60 + q.mm)
+    return { date: ld, time: lt, min: q.hh * 60 + q.mm, same: ld === date && lt === time }
+  } catch { return same }
+}
+const TZ_CITY = {
+  'Europe/Warsaw': 'Варшава', 'Asia/Tbilisi': 'Тбилиси', 'Europe/Kyiv': 'Киев', 'Europe/Kiev': 'Киев',
+  'Europe/Berlin': 'Берлин', 'Europe/London': 'Лондон', 'Europe/Istanbul': 'Стамбул', 'Asia/Yerevan': 'Ереван',
+}
+const tzCity = tz => TZ_CITY[tz] || (tz || '').split('/').pop().replace(/_/g, ' ')
+
+const todayIdx = () => (schedNow().getDay() + 6) % 7 // 0 = Пн, день недели в поясе расписания
 const toMin = t => { const [h, m] = (t || '0:0').split(':').map(Number); return h * 60 + m }
 const fmtMoney = n => (n || 0).toLocaleString('uk-UA') + ' ₴'
 const fmtDate = iso => (iso ? new Date(iso + 'T00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) : '—')
@@ -141,7 +187,7 @@ function autoPaidKeys(s) {
   const moves = s.moves || {}
   const occ = []
   for (let d = 0; d < 56; d++) {
-    const day = addDays(nowDate(), d)
+    const day = addDays(schedNow(), d)
     const dIso = iso(day)
     const wd = (day.getDay() + 6) % 7
     for (const sl of (s.slots || [])) {
@@ -149,7 +195,7 @@ function autoPaidKeys(s) {
     }
     for (const ex of (s.extra || [])) if (ex.date === dIso) occ.push({ date: dIso, start: ex.start })
   }
-  for (const mv of Object.values(moves)) if (mv.date >= iso(nowDate())) occ.push({ date: mv.date, start: mv.start })
+  for (const mv of Object.values(moves)) if (mv.date >= iso(schedNow())) occ.push({ date: mv.date, start: mv.start })
   occ.sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start))
   for (const o of occ) {
     if (n <= 0) break
@@ -182,7 +228,7 @@ function payStatus(s) {
 /* Ближайший урок ученика (слот + конкретная дата) */
 function nextLessonInfo(s) {
   if (!s.slots || !s.slots.length) return null
-  const now = nowDate()
+  const now = schedNow() // сравниваем в поясе расписания
   const nowDay = todayIdx()
   const nowMin = now.getHours() * 60 + now.getMinutes()
   let best = null
@@ -192,14 +238,19 @@ function nextLessonInfo(s) {
     const score = delta * 1440 + toMin(sl.start)
     if (!best || score < best.score) best = { score, sl, delta }
   }
-  return { ...best, date: iso(addDays(nowDate(), best.delta)) }
+  return { ...best, date: iso(addDays(now, best.delta)) }
 }
 
+/* подпись «сегодня/завтра в HH:MM» — по местному времени */
 function nextLesson(s) {
   const n = nextLessonInfo(s)
   if (!n) return null
-  const when = n.delta === 0 ? 'сегодня' : n.delta === 1 ? 'завтра' : DAYS[n.sl.day]
-  return `${when} в ${n.sl.start}`
+  const loc = toLocal(n.date, n.sl.start)
+  const today = iso(nowDate())
+  const tomorrow = iso(addDays(nowDate(), 1))
+  const when = loc.date === today ? 'сегодня' : loc.date === tomorrow ? 'завтра'
+    : DAYS[(new Date(loc.date + 'T00:00').getDay() + 6) % 7]
+  return `${when} в ${loc.time}${loc.same ? '' : ` (${tzCity(SCHED_TZ)} ${n.sl.start})`}`
 }
 
 /* ---------- API (сервер, когда рядом лежит api.php) ---------- */
@@ -263,6 +314,13 @@ const Logo = ({ size = 38 }) => (
     <path d="M42 47l4 4 8-8" stroke="#fff" strokeWidth="4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 )
+
+/* Приписка «· местное HH:MM», когда пояс расписания и местный расходятся */
+function LocalNote({ date, start }) {
+  const loc = toLocal(date, start)
+  if (loc.same) return null
+  return <span className="localnote"> · местное {loc.time}</span>
+}
 
 /* Иконки нижней навигации (мобильная версия) */
 const IcoUsers = () => (
@@ -609,7 +667,7 @@ function ProfileView({ student: s, onBack, onEdit, onPay, onRemoveExtra, onRemov
             ? s.slots.slice().sort((a, b) => a.day - b.day || toMin(a.start) - toMin(b.start)).map((sl, i) => (
                 <div className="slot-line" key={i}>
                   <span className="d">{DAYS[sl.day]}</span>
-                  <span>{sl.start}–{endTime(sl.start, sl.dur)}</span>
+                  <span>{sl.start}–{endTime(sl.start, sl.dur)}<LocalNote date={iso(schedNow())} start={sl.start} /></span>
                   {sl.type && <span className="lvl">{sl.type}</span>}
                   <span className="t">{sl.dur} мин</span>
                 </div>
@@ -621,7 +679,7 @@ function ProfileView({ student: s, onBack, onEdit, onPay, onRemoveExtra, onRemov
               {Object.entries(s.moves).sort((a, b) => a[1].date.localeCompare(b[1].date)).map(([orig, mv]) => (
                 <div className="slot-line" key={orig}>
                   <span className="d" style={{ width: 64 }}>{fmtDate(mv.date)}</span>
-                  <span>{mv.start}–{endTime(mv.start, mv.dur || 60)}</span>
+                  <span>{mv.start}–{endTime(mv.start, mv.dur || 60)}<LocalNote date={mv.date} start={mv.start} /></span>
                   <span className="t">вместо {fmtDate(orig.split('|')[0])} {orig.split('|')[1]}</span>
                   <button className="btn ghost sm" aria-label="Отменить перенос"
                     onClick={() => onRemoveMove(orig)}>✕</button>
@@ -637,7 +695,7 @@ function ProfileView({ student: s, onBack, onEdit, onPay, onRemoveExtra, onRemov
                 .map(ex => (
                   <div className="slot-line" key={ex.i}>
                     <span className="d" style={{ width: 64 }}>{fmtDate(ex.date)}</span>
-                    <span>{ex.start}–{endTime(ex.start, ex.dur)}</span>
+                    <span>{ex.start}–{endTime(ex.start, ex.dur)}<LocalNote date={ex.date} start={ex.start} /></span>
                     {ex.type && <span className="lvl">{ex.type}</span>}
                     <span className="t">{ex.dur} мин</span>
                     <button className="btn ghost sm" aria-label="Удалить разовый урок"
@@ -782,26 +840,33 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
 
   const lessons = useMemo(() => {
     const items = []
-    dates.forEach((d, di) => {
+    // уроки заданы в поясе расписания; на экране — местное время, поэтому
+    // сканируем ±1 день и кладём урок в колонку его МЕСТНОЙ даты
+    const visible = new Map(dates.map((d, i) => [iso(d), i]))
+    const place = base => {
+      const loc = toLocal(base.date, base.start)
+      const di = visible.get(loc.date)
+      if (di == null) return
+      items.push({ ...base, day: di, startMin: loc.min, lstart: loc.time, ldate: loc.date, same: loc.same })
+    }
+    for (let k = -1; k <= dates.length; k++) {
+      const d = addDays(dates[0], k)
       const dIso = iso(d)
       const wd = (d.getDay() + 6) % 7
       students.forEach(s => {
         const moves = s.moves || {}
         ;(s.slots || []).forEach(sl => {
           if (sl.day !== wd || moves[dIso + '|' + sl.start]) return
-          items.push({ ...sl, day: di, date: dIso, startMin: toMin(sl.start), student: s })
+          place({ ...sl, date: dIso, student: s })
         })
         ;(s.extra || []).forEach(ex => {
-          if (ex.date === dIso) items.push({ ...ex, day: di, startMin: toMin(ex.start), student: s, once: true })
+          if (ex.date === dIso) place({ ...ex, student: s, once: true })
         })
         Object.entries(moves).forEach(([orig, mv]) => {
-          if (mv.date === dIso) items.push({
-            day: di, date: dIso, start: mv.start, dur: mv.dur || 60,
-            startMin: toMin(mv.start), student: s, moved: true, origKey: orig,
-          })
+          if (mv.date === dIso) place({ date: dIso, start: mv.start, dur: mv.dur || 60, student: s, moved: true, origKey: orig })
         })
       })
-    })
+    }
     return items.map(l => {
       const key = lessonKey(l)
       const entry = (l.student.log || []).find(e => e.date === l.date && e.start === l.start)
@@ -868,8 +933,9 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
                 onClick={() => onLessonClick(l)}
                 onKeyDown={e => { if (e.key === 'Enter') onLessonClick(l) }}>
                 <div className="agtime">
-                  <b>{l.start}</b>
-                  <span>{endTime(l.start, l.dur)}</span>
+                  <b>{l.lstart}</b>
+                  <span>{hm(l.startMin + l.dur)}</span>
+                  {!l.same && <span className="agdur">{tzCity(SCHED_TZ)} {l.start}</span>}
                   <span className="agdur">{l.dur} мин</span>
                 </div>
                 <div className="agbody">
@@ -947,7 +1013,7 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
                       '--stu': COLORS[l.student.colorIdx % COLORS.length],
                     }}>
                     <b>{l.cancelled ? '✕ ' : ''}{l.student.name}</b>
-                    <span>{l.start}–{endTime(l.start, l.dur)}{l.type ? ' · ' + l.type : ''}{l.once ? ' · разовый' : ''}{l.moved ? ' · перенесён' : ''}</span>
+                    <span>{l.lstart}–{hm(l.startMin + l.dur)}{l.same ? '' : ` · ${tzCity(SCHED_TZ)} ${l.start}`}{l.type ? ' · ' + l.type : ''}{l.once ? ' · разовый' : ''}{l.moved ? ' · перенесён' : ''}</span>
                     <span className="lticks">
                       <button
                         className={'ltick blue' + (l.done ? ' on' : '')}
@@ -995,7 +1061,8 @@ function LessonDialog({ student: s, lesson, onSave, onOpenProfile, onToggleMark,
   const prevEntry = (s.log || []).find(e => e.date === lesson.date && e.start === lesson.start)
   const initialStatus = prevEntry ? (prevEntry.kind === 'cancelled' ? 'cancelled' : 'done') : 'none'
   // правило 24 часов: отмена меньше чем за сутки — со списанием (можно поменять вручную)
-  const under24 = new Date(lesson.date + 'T' + lesson.start).getTime() - nowDate().getTime() < 24 * 3600 * 1000
+  const under24 = zonedToUtc(lesson.date, lesson.start, SCHED_TZ) - Date.now() < 24 * 3600 * 1000
+  const loc = toLocal(lesson.date, lesson.start)
   const [status, setStatus] = useState(initialStatus)
   const [charge, setCharge] = useState(
     prevEntry && prevEntry.kind === 'cancelled' ? prevEntry.charged !== false : under24
@@ -1021,8 +1088,9 @@ function LessonDialog({ student: s, lesson, onSave, onOpenProfile, onToggleMark,
   return (
     <Modal title={s.name} onClose={onClose}>
       <p className="hint" style={{ marginTop: -10 }}>
-        {DAYS[(new Date(lesson.date + 'T00:00').getDay() + 6) % 7]}, {fmtDate(lesson.date)} · {lesson.start}–{endTime(lesson.start, lesson.dur)} · {lesson.dur} мин
-        {lesson.type ? ' · ' + lesson.type : ''} · местное время
+        {DAYS[(new Date(loc.date + 'T00:00').getDay() + 6) % 7]}, {fmtDate(loc.date)} · {loc.time}–{hm(loc.min + lesson.dur)} · {lesson.dur} мин
+        {lesson.type ? ' · ' + lesson.type : ''}
+        {loc.same ? ' · местное время' : ` · местное (${tzCity(SCHED_TZ)}: ${lesson.start}–${endTime(lesson.start, lesson.dur)})`}
       </p>
       <form onSubmit={submit}>
         <div className="field">
@@ -1340,6 +1408,10 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
   const [weekFilter, setWeekFilter] = useState('') // '' = все ученики
   // часовой пояс: смена пересчитывает «сегодня», подсветку и правило 24 ч
   const [tz, setTzState] = useState(APP_TZ)
+  // пояс, в котором ведётся расписание — общий, живёт в данных
+  const schedTz = (data && data._settings && data._settings.schedTz) || 'Europe/Warsaw'
+  SCHED_TZ = schedTz
+  const changeSchedTz = v => setData(d => ({ ...d, _settings: { ...((d && d._settings) || {}), schedTz: v } }))
   const tzZones = useMemo(() => {
     try { return Intl.supportedValuesOf('timeZone') } catch { return [] }
   }, [])
@@ -1436,7 +1508,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
   }, [])
 
   const students = useMemo(() =>
-    Object.entries(data || {}).map(([id, s]) => ({ ...withLedger(s), id }))
+    Object.entries(data || {}).filter(([id]) => !id.startsWith('_')).map(([id, s]) => ({ ...withLedger(s), id }))
       .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru')),
     [data])
 
@@ -1768,8 +1840,15 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
           : 'Данные хранятся в этом браузере.'}
       </p>
       <p className="storage-note tzline">
-        Часовой пояс расписания:{' '}
-        <select value={tz} onChange={e => changeTz(e.target.value)} aria-label="Часовой пояс расписания">
+        Расписание ведётся по времени:{' '}
+        <select value={schedTz} onChange={e => changeSchedTz(e.target.value)} aria-label="Пояс, в котором ведётся расписание">
+          {!tzZones.includes(schedTz) && <option value={schedTz}>{schedTz}</option>}
+          {tzZones.map(z => <option key={z} value={z}>{z}</option>)}
+        </select>
+      </p>
+      <p className="storage-note tzline">
+        Показывать по местному времени:{' '}
+        <select value={tz} onChange={e => changeTz(e.target.value)} aria-label="Местный часовой пояс для показа">
           <option value="">Авто — {deviceTz || 'устройство'}</option>
           {tzZones.map(z => <option key={z} value={z}>{z}</option>)}
         </select>
@@ -1864,7 +1943,7 @@ function StudentApp({ join }) {
       return
     }
     api('student_get', { token })
-      .then(r => setStu(r.student))
+      .then(r => { if (r.student && r.student.schedTz) SCHED_TZ = r.student.schedTz; setStu(r.student) })
       .catch(() => {
         try { localStorage.removeItem(tokenKey) } catch { /* приватный режим */ }
         setStu(null)
@@ -1987,7 +2066,7 @@ function StudentApp({ join }) {
             ? slots.map((sl, i) => (
                 <div className="slot-line" key={i}>
                   <span className="d">{DAYS[sl.day]}</span>
-                  <span>{sl.start}–{endTime(sl.start, sl.dur)}</span>
+                  <span>{sl.start}–{endTime(sl.start, sl.dur)}<LocalNote date={iso(schedNow())} start={sl.start} /></span>
                   {sl.type && <span className="lvl">{sl.type}</span>}
                   <span className="t">{sl.dur} мин</span>
                 </div>
@@ -1996,7 +2075,7 @@ function StudentApp({ join }) {
           {upcoming.map((ex, i) => (
             <div className="slot-line" key={'x' + i}>
               <span className="d" style={{ width: 64 }}>{fmtDate(ex.date)}</span>
-              <span>{ex.start}–{endTime(ex.start, ex.dur)}</span>
+              <span>{ex.start}–{endTime(ex.start, ex.dur)}<LocalNote date={ex.date} start={ex.start} /></span>
               {ex.type && <span className="lvl">{ex.type}</span>}
               <span className="t">{ex.dur} мин</span>
             </div>
@@ -2006,12 +2085,16 @@ function StudentApp({ join }) {
             .map(([k, mv]) => (
               <div className="slot-line" key={'m' + k}>
                 <span className="d" style={{ width: 64 }}>{fmtDate(mv.date)}</span>
-                <span>{mv.start}–{endTime(mv.start, mv.dur || 60)}</span>
+                <span>{mv.start}–{endTime(mv.start, mv.dur || 60)}<LocalNote date={mv.date} start={mv.start} /></span>
                 <span className="lvl">перенос</span>
                 <span className="t">вместо {fmtDate(k.split('|')[0])}</span>
               </div>
             ))}
-          <p className="hint">Время показано местное — вашего устройства.</p>
+          <p className="hint">
+            {SCHED_TZ === localTz()
+              ? 'Время показано местное — вашего устройства.'
+              : `Время указано по расписанию (${tzCity(SCHED_TZ)}); рядом — ваше местное.`}
+          </p>
         </section>
         <section className="pcard">
           <h4>Оплата</h4>
