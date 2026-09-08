@@ -215,6 +215,22 @@ nav.tabs button.on { background: var(--accent); color: var(--accent-ink); }
 .slot-line .t { color: var(--muted); margin-left: auto; }
 .payrow { display: flex; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
 .payrow:last-child { border-bottom: none; }
+/* выписка по счёту */
+.stmt { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; font-variant-numeric: tabular-nums; }
+.stmt-row { display: grid; grid-template-columns: 62px 1fr 88px 88px; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); align-items: baseline; font-size: 13px; }
+.stmt-row:last-child { border-bottom: none; }
+.stmt-head { background: var(--surface-2); color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.stmt-date { color: var(--muted); }
+.stmt-label { min-width: 0; overflow-wrap: anywhere; }
+.stmt-delta, .stmt-run { text-align: right; }
+.stmt-delta { font-weight: 700; }
+.stmt-delta.plus { color: var(--ok); }
+.stmt-delta.minus { color: var(--muted); }
+.stmt-run { font-weight: 600; }
+.stmt-base { color: var(--muted); background: var(--surface-2); }
+@media (max-width: 640px) {
+  .stmt-row { grid-template-columns: 54px 1fr 74px 74px; gap: 6px; padding: 8px 10px; font-size: 12.5px; }
+}
 .logcard {
   border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; margin-bottom: 8px;
   background: var(--bg);

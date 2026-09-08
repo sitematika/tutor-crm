@@ -72,14 +72,35 @@ const currentBookmark = s => {
    из записей — база (adjust) + все оплаты − все списания за уроки. Любая
    галочка добавляет/убирает запись, значения сходятся из реального статуса. */
 const sumPayments = s => (s.payments || []).reduce((a, p) => a + (p.amount || 0), 0)
-const sumCharges = s => (s.log || [])
-  .filter(e => e.charged !== false && (
-    e.paidBy === 'balance' || e.paidBy == null ||
-    // ранние записи «оплачен галочкой»: считаются списанием, если по ним
-    // была записана авто-оплата (взаимно гасятся — счёт сходится)
-    (e.paidBy === 'mark' && (s.payments || []).some(p => p.auto && p.lesson === e.date + '|' + e.start))
-  ))
-  .reduce((a, e) => a + (e.amount != null ? e.amount : (s.rate || 0)), 0)
+/* Запись урока — списание со счёта? (единый критерий для суммы и выписки) */
+const isCharge = (e, s) => e.charged !== false && (
+  e.paidBy === 'balance' || e.paidBy == null ||
+  // ранние записи «оплачен галочкой»: считаются списанием, если по ним
+  // была записана авто-оплата (взаимно гасятся — счёт сходится)
+  (e.paidBy === 'mark' && (s.payments || []).some(p => p.auto && p.lesson === e.date + '|' + e.start))
+)
+const chargeAmount = (e, s) => (e.amount != null ? e.amount : (s.rate || 0))
+const sumCharges = s => (s.log || []).filter(e => isCharge(e, s))
+  .reduce((a, e) => a + chargeAmount(e, s), 0)
+
+/* Выписка по счёту: все движения в хронологии с остатком после каждого */
+const statementRows = s => {
+  const rows = []
+  ;(s.payments || []).forEach(p => {
+    const t = p.lesson ? p.lesson.split('|')[1] : '00:00'
+    rows.push({
+      k: p.date + '|' + t + '|0', date: p.date, delta: p.amount || 0,
+      label: p.use ? `Урок со счёта · ${t}` : p.auto ? `Оплата за урок · ${t}` : 'Оплата',
+    })
+  })
+  ;(s.log || []).filter(e => isCharge(e, s)).forEach(e => rows.push({
+    k: e.date + '|' + e.start + '|1', date: e.date, delta: -chargeAmount(e, s),
+    label: (e.kind === 'cancelled' ? 'Отмена со списанием' : 'Урок проведён') + ` · ${e.start}–${endTime(e.start, e.dur)}`,
+  }))
+  rows.sort((a, b) => a.k.localeCompare(b.k))
+  let run = s.adjust || 0
+  return rows.map(r => { run += r.delta; return { ...r, run } })
+}
 const withLedger = s => {
   const adjust = s.adjust != null ? s.adjust : (s.balance || 0) - sumPayments(s) + sumCharges(s)
   return { ...s, adjust, balance: adjust + sumPayments(s) - sumCharges(s) }
@@ -153,7 +174,7 @@ function payStatus(s) {
   if (rate > 0 && b >= rate) return { k: 'paid', label: `Наперёд · ${Math.floor(b / rate)} ур.` }
   const next = nextLessonInfo(s)
   const nextPaid = next && (s.marks || {})[next.date + '|' + next.sl.start]
-  if (s.paidTick || nextPaid) return { k: 'paid', label: 'Оплачено ✓' }
+  if (nextPaid) return { k: 'paid', label: 'Оплачено ✓' }
   if (b > 0) return { k: 'due', label: 'Мало на счету' }
   return { k: 'paid', label: 'Всё оплачено' }
 }
@@ -295,18 +316,6 @@ function TypeOptions() {
   )
 }
 
-function Tick({ student, onToggle }) {
-  return (
-    <button
-      className={'tick' + (student.paidTick ? ' on' : '')}
-      title={student.paidTick ? 'Оплата отмечена — снять галочку' : 'Отметить: урок оплачен'}
-      aria-label={'Оплата: ' + (student.paidTick ? 'отмечена' : 'не отмечена')}
-      aria-pressed={!!student.paidTick}
-      onClick={e => { e.stopPropagation(); onToggle(student) }}
-    >✓</button>
-  )
-}
-
 function Modal({ title, onClose, children }) {
   useEffect(() => {
     const h = e => { if (e.key === 'Escape') onClose() }
@@ -422,19 +431,26 @@ function StudentForm({ initial, onSave, onClose, onDelete }) {
 /* ---------- payment form ---------- */
 function PaymentForm({ student, onSave, onClose }) {
   const [amount, setAmount] = useState((student.rate || 0) * 4)
+  const [date, setDate] = useState(iso(nowDate()))
   const submit = e => {
     e.preventDefault()
     const a = Number(amount) || 0
-    if (a <= 0) return
-    onSave({ date: nowDate().toISOString().slice(0, 10), amount: a })
+    if (a <= 0 || !date) return
+    onSave({ date, amount: a })
   }
   const lessons = student.rate > 0 ? Math.floor((Number(amount) || 0) / student.rate) : 0
   return (
     <Modal title={'Оплата — ' + student.name} onClose={onClose}>
       <form onSubmit={submit}>
-        <div className="field">
-          <label htmlFor="p-amount">Сумма, ₴</label>
-          <input id="p-amount" type="number" min="50" step="50" value={amount} onChange={e => setAmount(e.target.value)} autoFocus />
+        <div className="frow">
+          <div className="field">
+            <label htmlFor="p-amount">Сумма, ₴</label>
+            <input id="p-amount" type="number" min="50" step="50" value={amount} onChange={e => setAmount(e.target.value)} autoFocus />
+          </div>
+          <div className="field">
+            <label htmlFor="p-date">Дата оплаты</label>
+            <input id="p-date" type="date" value={date} onChange={e => setDate(e.target.value)} />
+          </div>
         </div>
         {lessons > 0 && <p className="hint">≈ {lessons} ур. по ставке {fmtMoney(student.rate)}</p>}
         <div className="mfoot">
@@ -514,7 +530,7 @@ function LessonForm({ students, defaultDate, onSave, onClose }) {
 }
 
 /* ---------- students view ---------- */
-function StudentsView({ students, onOpen, onAdd, onTick }) {
+function StudentsView({ students, onOpen, onAdd }) {
   if (!students.length) return (
     <div className="empty">
       <h3>Пока нет учеников</h3>
@@ -569,8 +585,8 @@ function InviteLink({ join }) {
   )
 }
 
-function ProfileView({ student: s, onBack, onEdit, onPay, onTick, onRemoveExtra, onRemoveMove, serverMode, onMakeJoin, onToggleHw, onDeleteHw }) {
-  const payments = (s.payments || []).slice().reverse()
+function ProfileView({ student: s, onBack, onEdit, onPay, onRemoveExtra, onRemoveMove, serverMode, onMakeJoin, onToggleHw, onDeleteHw }) {
+  const stmt = statementRows(s)
   const lessonsLeft = s.rate > 0 && s.balance > 0 ? Math.floor(s.balance / s.rate) : 0
   return (
     <div className="profile">
@@ -671,25 +687,36 @@ function ProfileView({ student: s, onBack, onEdit, onPay, onTick, onRemoveExtra,
             <b>{fmtMoney(s.balance)}</b>
             <span>{lessonsLeft > 0 ? `≈ ${lessonsLeft} ур. наперёд` : 'на счету'}</span>
           </div>
-          <p className="hint" style={{ margin: '0 0 6px' }}>
-            Оплаты {fmtMoney(sumPayments(s))} · Списания {fmtMoney(sumCharges(s))}
-            {s.adjust ? ` · База ${fmtMoney(s.adjust)}` : ''}
-          </p>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Pill student={s} />
-            <Tick student={s} onToggle={onTick} />
-            <span style={{ color: 'var(--muted)', fontSize: 13 }}>урок оплачен отдельно</span>
-          </div>
-          <h4>История оплат</h4>
-          {payments.length
-            ? payments.map((p, i) => (
-                <div className="payrow" key={i}>
-                  <span>{fmtDate(p.date)}{p.use ? ' · урок со счёта' : p.auto ? ' · за урок' : ''}</span>
-                  <span className="amt">{fmtMoney(p.amount)}</span>
+          <Pill student={s} />
+          <h4>Движения по счёту</h4>
+          {stmt.length
+            ? (
+              <div className="stmt">
+                <div className="stmt-row stmt-head">
+                  <span>Дата</span><span>Операция</span><span>Сумма</span><span>Остаток</span>
                 </div>
-              ))
-            : <p style={{ color: 'var(--muted)', margin: 0 }}>Оплат ещё не было.</p>}
-          <h4>Проведённые уроки</h4>
+                {stmt.slice().reverse().map(r => (
+                  <div className="stmt-row" key={r.k}>
+                    <span className="stmt-date">{fmtDate(r.date)}</span>
+                    <span className="stmt-label">{r.label}</span>
+                    <span className={'stmt-delta' + (r.delta >= 0 ? ' plus' : ' minus')}>
+                      {r.delta >= 0 ? '+' : '−'}{fmtMoney(Math.abs(r.delta))}
+                    </span>
+                    <span className="stmt-run">{fmtMoney(r.run)}</span>
+                  </div>
+                ))}
+                {s.adjust ? (
+                  <div className="stmt-row stmt-base">
+                    <span className="stmt-date">—</span>
+                    <span className="stmt-label">Начальный остаток (без записей)</span>
+                    <span className="stmt-delta">{fmtMoney(s.adjust)}</span>
+                    <span className="stmt-run">{fmtMoney(s.adjust)}</span>
+                  </div>
+                ) : null}
+              </div>
+            )
+            : <p style={{ color: 'var(--muted)', margin: 0 }}>Движений ещё не было — внесите оплату или отметьте урок в календаре.</p>}
+          <h4>Журнал уроков</h4>
           {(s.log || []).length
             ? s.log.slice().reverse().map((e, i) => (
                 <div className={'logcard' + (e.kind === 'cancelled' ? ' cancel' : '')} key={i}>
@@ -973,6 +1000,15 @@ function LessonDialog({ student: s, lesson, onSave, onOpenProfile, onToggleMark,
         {status === 'none' && initialStatus !== 'none' && (
           <p className="hint">Отметка снимется, списание (если было) вернётся на счёт.</p>
         )}
+        <button type="button" className={'paybtn' + (paid ? ' on' : '')}
+          onClick={() => onToggleMark(s, lesson.key)}>
+          {paid
+            ? '✓ Урок оплачен'
+            : (s.balance || 0) >= (s.rate || 0) && s.rate > 0
+              ? `Отметить: урок оплачен (−${fmtMoney(s.rate)} со счёта)`
+              : `Отметить: урок оплачен (+${fmtMoney(s.rate)})`}
+        </button>
+        {lesson.autoPaid && !paid && <p className="hint">Покрыт предоплатой с баланса — спишется при проведении.</p>}
         {prevHw && (
           <div className="prevhw">
             <label className="check-line" style={{ margin: 0 }}>
@@ -993,15 +1029,6 @@ function LessonDialog({ student: s, lesson, onSave, onOpenProfile, onToggleMark,
           <textarea id="ld-hw" value={hw} onChange={e => setHw(e.target.value)}
             placeholder="Ученик увидит это в своём кабинете" />
         </div>
-        <button type="button" className={'paybtn' + (paid ? ' on' : '')}
-          onClick={() => onToggleMark(s, lesson.key)}>
-          {paid
-            ? '✓ Урок оплачен'
-            : (s.balance || 0) >= (s.rate || 0) && s.rate > 0
-              ? `Отметить: урок оплачен (−${fmtMoney(s.rate)} со счёта)`
-              : `Отметить: урок оплачен (+${fmtMoney(s.rate)})`}
-        </button>
-        {lesson.autoPaid && !paid && <p className="hint">Покрыт предоплатой с баланса — спишется при проведении.</p>}
         <div className="field" style={{ marginTop: 10 }}>
           <label>Перенос урока (только эта дата, расписание не меняется)</label>
           <div className="slot-edit" style={{ marginBottom: 0 }}>
@@ -1047,7 +1074,7 @@ function BarChart({ data, money }) {
 }
 
 /* ---------- payments view ---------- */
-function PaymentsView({ students, onOpen, onPay, onTick }) {
+function PaymentsView({ students, onOpen, onPay }) {
   const waiting = students.filter(s => payStatus(s).k !== 'paid')
   const lessonsWeek = students.reduce((n, s) => n + (s.slots || []).length, 0)
   const thisMonth = nowDate().toISOString().slice(0, 7)
@@ -1116,7 +1143,8 @@ function PaymentsView({ students, onOpen, onPay, onTick }) {
           </thead>
           <tbody>
             {sorted.map(s => {
-              const last = (s.payments || [])[(s.payments || []).length - 1]
+              const incoming = (s.payments || []).filter(p => !p.use)
+              const last = incoming[incoming.length - 1]
               return (
                 <tr key={s.id} className="rowlink" onClick={() => onOpen(s.id)}>
                   <td>
@@ -1395,8 +1423,6 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
     setOpenId(null)
   }
 
-  const handleTick = s => save(s.id, { ...s, paidTick: !s.paidTick })
-
   // сохранение из окна урока: статус (проведён/отменён, правило 24 ч) + домашка
   const handleLessonDialogSave = ({ lesson, status, prevEntry, hw, charge, bm }) => {
     const s = byId(lessonDlg.studentId)
@@ -1582,7 +1608,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
             <span className="spacer" />
             <button className="btn primary" onClick={() => setEditing('new')}>+ Ученик</button>
           </div>
-          <StudentsView students={students} onOpen={setOpenId} onAdd={() => setEditing('new')} onTick={handleTick} />
+          <StudentsView students={students} onOpen={setOpenId} onAdd={() => setEditing('new')} />
         </FadeContent>
       )}
 
@@ -1592,7 +1618,6 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
           onBack={() => setOpenId(null)}
           onEdit={() => setEditing(open.id)}
           onPay={() => setPayingId(open.id)}
-          onTick={handleTick}
           onRemoveExtra={i => handleRemoveExtra(open, i)}
           onRemoveMove={k => handleRemoveMove(open, k)}
           serverMode={mode === 'server'}
@@ -1648,8 +1673,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
           </div>
           <PaymentsView students={students}
             onOpen={id => { setTab('students'); setOpenId(id) }}
-            onPay={setPayingId}
-            onTick={handleTick} />
+            onPay={setPayingId} />
         </FadeContent>
       )}
 
