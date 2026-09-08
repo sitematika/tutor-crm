@@ -684,7 +684,7 @@ function ProfileView({ student: s, onBack, onEdit, onPay, onTick, onRemoveExtra,
           {payments.length
             ? payments.map((p, i) => (
                 <div className="payrow" key={i}>
-                  <span>{fmtDate(p.date)}{p.auto ? ' · за урок' : ''}</span>
+                  <span>{fmtDate(p.date)}{p.use ? ' · урок со счёта' : p.auto ? ' · за урок' : ''}</span>
                   <span className="amt">{fmtMoney(p.amount)}</span>
                 </div>
               ))
@@ -882,7 +882,11 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
                           ? 'Оплачен предоплатой со счёта (урок проведён)'
                           : l.autoPaid
                             ? 'Оплачено предоплатой с баланса — спишется при проведении'
-                            : l.paid ? 'Урок оплачен — снять (уберёт зачисление)' : 'Урок оплачен (+ставка на счёт)'}
+                            : l.paid
+                              ? 'Урок оплачен — снять отметку (вернёт движение по счёту)'
+                              : (l.student.balance || 0) >= (l.student.rate || 0) && l.student.rate > 0
+                                ? 'Урок оплачен — спишет ставку со счёта'
+                                : 'Урок оплачен (+ставка на счёт)'}
                         aria-label={'Урок оплачен: ' + (l.paid || l.autoPaid || l.covered ? 'да' : 'нет')}
                         aria-pressed={l.paid || l.autoPaid || l.covered}
                         onClick={e => { e.stopPropagation(); onToggleMark(l.student, l.key) }}
@@ -991,7 +995,11 @@ function LessonDialog({ student: s, lesson, onSave, onOpenProfile, onToggleMark,
         </div>
         <button type="button" className={'paybtn' + (paid ? ' on' : '')}
           onClick={() => onToggleMark(s, lesson.key)}>
-          {paid ? '✓ Урок оплачен · +' + fmtMoney(s.rate) + ' на счету' : 'Отметить: урок оплачен (+' + fmtMoney(s.rate) + ')'}
+          {paid
+            ? '✓ Урок оплачен'
+            : (s.balance || 0) >= (s.rate || 0) && s.rate > 0
+              ? `Отметить: урок оплачен (−${fmtMoney(s.rate)} со счёта)`
+              : `Отметить: урок оплачен (+${fmtMoney(s.rate)})`}
         </button>
         {lesson.autoPaid && !paid && <p className="hint">Покрыт предоплатой с баланса — спишется при проведении.</p>}
         <div className="field" style={{ marginTop: 10 }}>
@@ -1044,7 +1052,7 @@ function PaymentsView({ students, onOpen, onPay, onTick }) {
   const lessonsWeek = students.reduce((n, s) => n + (s.slots || []).length, 0)
   const thisMonth = nowDate().toISOString().slice(0, 7)
   const monthIncome = students.reduce((sum, s) =>
-    sum + (s.payments || []).filter(p => p.date && p.date.slice(0, 7) === thisMonth)
+    sum + (s.payments || []).filter(p => !p.use && p.date && p.date.slice(0, 7) === thisMonth)
       .reduce((a, p) => a + (p.amount || 0), 0), 0)
 
   const sorted = students.slice().sort((a, b) => (a.balance || 0) - (b.balance || 0))
@@ -1059,7 +1067,7 @@ function PaymentsView({ students, onOpen, onPay, onTick }) {
   const incomeData = months.map(m => ({
     label: m.label,
     value: students.reduce((sum, s) =>
-      sum + (s.payments || []).filter(p => p.date && p.date.slice(0, 7) === m.ym)
+      sum + (s.payments || []).filter(p => !p.use && p.date && p.date.slice(0, 7) === m.ym)
         .reduce((a, p) => a + (p.amount || 0), 0), 0),
   }))
   const lessonsData = months.map(m => ({
@@ -1410,9 +1418,11 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
     } else if (hwIdx >= 0) hws.splice(hwIdx, 1)
     next.homeworks = hws
 
-    // новая запись: проведён — всегда со списанием; отменён — по галочке
+    // новая запись: проведён — со списанием (если урок не оплачен со счёта
+    // галочкой раньше); отменён — по галочке
     if (status !== 'none') {
-      const willCharge = status === 'done' ? true : !!charge
+      const consumed = (s.payments || []).some(p => p.use && p.lesson === lessonKey(lesson))
+      const willCharge = (status === 'done' ? true : !!charge) && !consumed
       next.log = [...next.log, {
         date: lesson.date, start: lesson.start, dur: lesson.dur, type: lesson.type,
         kind: status, charged: willCharge,
@@ -1465,10 +1475,16 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
     const rate = s.rate || 0
     if (marks[key]) {
       delete marks[key]
-      next.payments = (s.payments || []).filter(p => !(p.auto && p.lesson === key))
+      next.payments = (s.payments || []).filter(p => !((p.auto || p.use) && p.lesson === key))
     } else {
       marks[key] = true
-      next.payments = [...(s.payments || []), { date: key.split('|')[0], amount: rate, lesson: key, auto: true }]
+      if (rate > 0 && (s.balance || 0) >= rate) {
+        // есть предоплата — урок оплачивается СО СЧЁТА: списание с записью в истории
+        next.payments = [...(s.payments || []), { date: key.split('|')[0], amount: -rate, lesson: key, use: true }]
+      } else {
+        // денег на счету нет — галочка означает свежую оплату за урок
+        next.payments = [...(s.payments || []), { date: key.split('|')[0], amount: rate, lesson: key, auto: true }]
+      }
     }
     save(s.id, withLedger(next))
   }
@@ -1483,9 +1499,13 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
       next.log = (s.log || []).filter(e => !isEntry(e))
       if (entry.charged !== false && entry.paidBy === 'tick') next.paidTick = true
     } else {
+      // урок, уже оплаченный со счёта галочкой, повторно не списывается
+      const consumed = (s.payments || []).some(p => p.use && p.lesson === lessonKey(lesson))
       next.log = [...(s.log || []), {
         date: lesson.date, start: lesson.start, dur: lesson.dur, type: lesson.type,
-        kind: 'done', charged: true, paidBy: 'balance', amount: next.rate || 0,
+        kind: 'done', charged: !consumed,
+        paidBy: consumed ? undefined : 'balance',
+        amount: consumed ? undefined : (next.rate || 0),
       }]
     }
     save(s.id, withLedger(next))
