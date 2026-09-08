@@ -165,6 +165,7 @@ switch ($action) {
       'homework' => $s['homework'] ?? '',
       'homeworks' => $s['homeworks'] ?? [],
       'schedTz' => $data['_settings']['schedTz'] ?? 'Europe/Warsaw',
+      'showTz' => $data['_settings']['showTz'] ?? ['Europe/Warsaw', 'Europe/Kyiv'],
       'bookmark' => $s['bookmark'] ?? '',
       'slots' => $s['slots'] ?? [],
       'extra' => $s['extra'] ?? [],

@@ -70,6 +70,34 @@ const TZ_CITY = {
 }
 const tzCity = tz => TZ_CITY[tz] || (tz || '').split('/').pop().replace(/_/g, ' ')
 
+/* Страны с флагами, в чьих поясах показывать время урока (настройка внизу) */
+const TZ_FLAGS = [
+  ['Europe/Warsaw', '🇵🇱', 'Польша'], ['Europe/Kyiv', '🇺🇦', 'Украина'], ['Asia/Tbilisi', '🇬🇪', 'Грузия'],
+  ['Europe/Berlin', '🇩🇪', 'Германия'], ['Europe/London', '🇬🇧', 'Британия'], ['Europe/Istanbul', '🇹🇷', 'Турция'],
+  ['Asia/Yerevan', '🇦🇲', 'Армения'], ['Europe/Prague', '🇨🇿', 'Чехия'], ['Europe/Vilnius', '🇱🇹', 'Литва'],
+  ['Europe/Madrid', '🇪🇸', 'Испания'], ['Europe/Rome', '🇮🇹', 'Италия'], ['Europe/Paris', '🇫🇷', 'Франция'],
+  ['Asia/Jerusalem', '🇮🇱', 'Израиль'], ['Asia/Dubai', '🇦🇪', 'ОАЭ'], ['America/New_York', '🇺🇸', 'США'],
+  ['Europe/Lisbon', '🇵🇹', 'Португалия'], ['Europe/Chisinau', '🇲🇩', 'Молдова'],
+]
+const flagOf = tz => (TZ_FLAGS.find(f => f[0] === tz) || [tz, '🕐', tzCity(tz)])[1]
+let SHOW_TZ = ['Europe/Warsaw', 'Europe/Kyiv']
+/* время урока в выбранных поясах — только те, что отличаются от местного */
+const zoneTimes = (date, start) => {
+  const out = []
+  const loc = toLocal(date, start)
+  let ms
+  try { ms = zonedToUtc(date, start, SCHED_TZ) } catch { return out }
+  for (const tz of SHOW_TZ) {
+    try {
+      const q = tzParts(ms, tz)
+      const t = hm(q.hh * 60 + q.mm)
+      if (t !== loc.time) out.push({ tz, flag: flagOf(tz), time: t })
+    } catch { /* неизвестный пояс — пропускаем */ }
+  }
+  return out
+}
+const zoneText = (date, start) => zoneTimes(date, start).map(z => `${z.flag} ${z.time}`).join(' · ')
+
 const todayIdx = () => (schedNow().getDay() + 6) % 7 // 0 = Пн, день недели в поясе расписания
 const toMin = t => { const [h, m] = (t || '0:0').split(':').map(Number); return h * 60 + m }
 const fmtMoney = n => (n || 0).toLocaleString('uk-UA') + ' ₴'
@@ -250,7 +278,8 @@ function nextLesson(s) {
   const tomorrow = iso(addDays(nowDate(), 1))
   const when = loc.date === today ? 'сегодня' : loc.date === tomorrow ? 'завтра'
     : DAYS[(new Date(loc.date + 'T00:00').getDay() + 6) % 7]
-  return `${when} в ${loc.time}${loc.same ? '' : ` (${tzCity(SCHED_TZ)} ${n.sl.start})`}`
+  const z = zoneText(n.date, n.sl.start)
+  return `${when} в ${loc.time}${z ? ` (${z})` : ''}`
 }
 
 /* ---------- API (сервер, когда рядом лежит api.php) ---------- */
@@ -315,11 +344,11 @@ const Logo = ({ size = 38 }) => (
   </svg>
 )
 
-/* Приписка «· местное HH:MM», когда пояс расписания и местный расходятся */
-function LocalNote({ date, start }) {
-  const loc = toLocal(date, start)
-  if (loc.same) return null
-  return <span className="localnote"> · местное {loc.time}</span>
+/* Приписка с флагами: время урока в других поясах, если оно отличается */
+function LocalNote({ date, start, bare }) {
+  const z = zoneText(date, start)
+  if (!z) return null
+  return <span className="localnote">{bare ? z : ' · ' + z}</span>
 }
 
 /* Иконки нижней навигации (мобильная версия) */
@@ -935,7 +964,6 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
                 <div className="agtime">
                   <b>{l.lstart}</b>
                   <span>{hm(l.startMin + l.dur)}</span>
-                  {!l.same && <span className="agdur">{tzCity(SCHED_TZ)} {l.start}</span>}
                   <span className="agdur">{l.dur} мин</span>
                 </div>
                 <div className="agbody">
@@ -952,6 +980,9 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
                     <Pill student={s} />
                     <span>на счету {fmtMoney(s.balance)} · {fmtMoney(s.rate)} / урок</span>
                   </div>
+                  {zoneText(l.date, l.start) && (
+                    <div className="agline"><LocalNote date={l.date} start={l.start} bare /></div>
+                  )}
                   <div className="agline">📖 {book ? `Остановились: ${book}` : 'Прогресс ещё не отмечали'}</div>
                   {lastHw && <div className="agline">ДЗ: {lastHw.text}{lastHw.done ? ' · сделано ✓' : ''}</div>}
                 </div>
@@ -1013,7 +1044,7 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
                       '--stu': COLORS[l.student.colorIdx % COLORS.length],
                     }}>
                     <b>{l.cancelled ? '✕ ' : ''}{l.student.name}</b>
-                    <span>{l.lstart}–{hm(l.startMin + l.dur)}{l.same ? '' : ` · ${tzCity(SCHED_TZ)} ${l.start}`}{l.type ? ' · ' + l.type : ''}{l.once ? ' · разовый' : ''}{l.moved ? ' · перенесён' : ''}</span>
+                    <span>{l.lstart}–{hm(l.startMin + l.dur)}<LocalNote date={l.date} start={l.start} />{l.type ? ' · ' + l.type : ''}{l.once ? ' · разовый' : ''}{l.moved ? ' · перенесён' : ''}</span>
                     <span className="lticks">
                       <button
                         className={'ltick blue' + (l.done ? ' on' : '')}
@@ -1089,8 +1120,8 @@ function LessonDialog({ student: s, lesson, onSave, onOpenProfile, onToggleMark,
     <Modal title={s.name} onClose={onClose}>
       <p className="hint" style={{ marginTop: -10 }}>
         {DAYS[(new Date(loc.date + 'T00:00').getDay() + 6) % 7]}, {fmtDate(loc.date)} · {loc.time}–{hm(loc.min + lesson.dur)} · {lesson.dur} мин
-        {lesson.type ? ' · ' + lesson.type : ''}
-        {loc.same ? ' · местное время' : ` · местное (${tzCity(SCHED_TZ)}: ${lesson.start}–${endTime(lesson.start, lesson.dur)})`}
+        {lesson.type ? ' · ' + lesson.type : ''} · местное время
+        <LocalNote date={lesson.date} start={lesson.start} />
       </p>
       <form onSubmit={submit}>
         <div className="field">
@@ -1412,6 +1443,13 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
   const schedTz = (data && data._settings && data._settings.schedTz) || 'Europe/Warsaw'
   SCHED_TZ = schedTz
   const changeSchedTz = v => setData(d => ({ ...d, _settings: { ...((d && d._settings) || {}), schedTz: v } }))
+  const showTz = (data && data._settings && data._settings.showTz) || ['Europe/Warsaw', 'Europe/Kyiv']
+  SHOW_TZ = showTz
+  const toggleShowTz = tz => setData(d => {
+    const cur = (d && d._settings && d._settings.showTz) || ['Europe/Warsaw', 'Europe/Kyiv']
+    const next = cur.includes(tz) ? cur.filter(x => x !== tz) : [...cur, tz]
+    return { ...d, _settings: { ...((d && d._settings) || {}), showTz: next } }
+  })
   const tzZones = useMemo(() => {
     try { return Intl.supportedValuesOf('timeZone') } catch { return [] }
   }, [])
@@ -1433,7 +1471,8 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
     if (calScope === 'day') setDayDate(iso(addDays(new Date(dayDate + 'T00:00'), n)))
     else setWeekStart(w => addDays(w, 7 * n))
   }
-  const calToday = () => { setDayDate(iso(nowDate())); setWeekStart(mondayOf(nowDate())) }
+  // «Сегодня» — сразу детальный вид сегодняшнего дня
+  const calToday = () => { setDayDate(iso(nowDate())); setWeekStart(mondayOf(nowDate())); setCalScope('day') }
   const calPick = v => {
     if (!v) return
     setDayDate(v)
@@ -1853,6 +1892,13 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
           {tzZones.map(z => <option key={z} value={z}>{z}</option>)}
         </select>
       </p>
+      <p className="storage-note tzline chips">
+        Показывать время также:{' '}
+        {TZ_FLAGS.map(([z, flag, name]) => (
+          <button key={z} type="button" className={'chip' + (showTz.includes(z) ? ' on' : '')}
+            aria-pressed={showTz.includes(z)} onClick={() => toggleShowTz(z)}>{flag} {name}</button>
+        ))}
+      </p>
 
       <nav className="bottombar" aria-label="Разделы">
         <button className={tab === 'students' ? 'on' : ''} onClick={() => showTab('students')}>
@@ -1943,7 +1989,11 @@ function StudentApp({ join }) {
       return
     }
     api('student_get', { token })
-      .then(r => { if (r.student && r.student.schedTz) SCHED_TZ = r.student.schedTz; setStu(r.student) })
+      .then(r => {
+        if (r.student && r.student.schedTz) SCHED_TZ = r.student.schedTz
+        if (r.student && Array.isArray(r.student.showTz)) SHOW_TZ = r.student.showTz
+        setStu(r.student)
+      })
       .catch(() => {
         try { localStorage.removeItem(tokenKey) } catch { /* приватный режим */ }
         setStu(null)
@@ -2090,11 +2140,7 @@ function StudentApp({ join }) {
                 <span className="t">вместо {fmtDate(k.split('|')[0])}</span>
               </div>
             ))}
-          <p className="hint">
-            {SCHED_TZ === localTz()
-              ? 'Время показано местное — вашего устройства.'
-              : `Время указано по расписанию (${tzCity(SCHED_TZ)}); рядом — ваше местное.`}
-          </p>
+          <p className="hint">Время — по расписанию ({tzCity(SCHED_TZ)}); флаги рядом — то же время в других странах.</p>
         </section>
         <section className="pcard">
           <h4>Оплата</h4>
