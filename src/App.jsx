@@ -11,7 +11,20 @@ const COLORS = ['#4E79A7', '#B3623F', '#5F9E6E', '#8B6BB1', '#C2903A', '#3E8F8F'
 const STORAGE_KEY = 'tutor-crm-students-v2'
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7)
-const todayIdx = () => (new Date().getDay() + 6) % 7 // 0 = Пн
+
+/* Часовой пояс расписания: по умолчанию — устройства, можно выбрать вручную
+   (настройка внизу страницы). nowDate() отдаёт «сейчас» в выбранном поясе. */
+let APP_TZ = ''
+try { APP_TZ = localStorage.getItem('atc-tz') || '' } catch { /* приватный режим */ }
+const deviceTz = (() => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return '' }
+})()
+const nowDate = () => {
+  if (!APP_TZ) return new Date()
+  try { return new Date(new Date().toLocaleString('en-US', { timeZone: APP_TZ })) } catch { return new Date() }
+}
+
+const todayIdx = () => (nowDate().getDay() + 6) % 7 // 0 = Пн
 const toMin = t => { const [h, m] = (t || '0:0').split(':').map(Number); return h * 60 + m }
 const fmtMoney = n => (n || 0).toLocaleString('uk-UA') + ' ₴'
 const fmtDate = iso => (iso ? new Date(iso + 'T00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) : '—')
@@ -67,6 +80,24 @@ const withLedger = s => {
   return { ...s, adjust, balance: adjust + sumPayments(s) - sumCharges(s) }
 }
 
+/* Неоплаченные из проведённых: при долге не оплачены ровно последние
+   ceil(долг/ставка) списанных уроков; без долга — все проведённые оплачены */
+function unpaidDoneKeys(s) {
+  const rate = s.rate || 0
+  let n = rate > 0 ? Math.ceil(Math.max(0, -(s.balance || 0)) / rate) : 0
+  const keys = new Set()
+  if (n <= 0) return keys
+  const entries = (s.log || [])
+    .filter(e => e.charged !== false && (e.paidBy === 'balance' || e.paidBy == null))
+    .sort((a, b) => (b.date + b.start).localeCompare(a.date + a.start))
+  for (const e of entries) {
+    if (n <= 0) break
+    keys.add(e.date + '|' + e.start)
+    n--
+  }
+  return keys
+}
+
 /* Будущие уроки, покрытые предоплатой на счету: первые floor(баланс/ставка)
    предстоящих занятий (без проведённых/отменённых и оплаченных вручную) */
 function autoPaidKeys(s) {
@@ -84,7 +115,7 @@ function autoPaidKeys(s) {
   const moves = s.moves || {}
   const occ = []
   for (let d = 0; d < 56; d++) {
-    const day = addDays(new Date(), d)
+    const day = addDays(nowDate(), d)
     const dIso = iso(day)
     const wd = (day.getDay() + 6) % 7
     for (const sl of (s.slots || [])) {
@@ -92,7 +123,7 @@ function autoPaidKeys(s) {
     }
     for (const ex of (s.extra || [])) if (ex.date === dIso) occ.push({ date: dIso, start: ex.start })
   }
-  for (const mv of Object.values(moves)) if (mv.date >= iso(new Date())) occ.push({ date: mv.date, start: mv.start })
+  for (const mv of Object.values(moves)) if (mv.date >= iso(nowDate())) occ.push({ date: mv.date, start: mv.start })
   occ.sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start))
   for (const o of occ) {
     if (n <= 0) break
@@ -125,7 +156,7 @@ function payStatus(s) {
 /* Ближайший урок ученика (слот + конкретная дата) */
 function nextLessonInfo(s) {
   if (!s.slots || !s.slots.length) return null
-  const now = new Date()
+  const now = nowDate()
   const nowDay = todayIdx()
   const nowMin = now.getHours() * 60 + now.getMinutes()
   let best = null
@@ -135,7 +166,7 @@ function nextLessonInfo(s) {
     const score = delta * 1440 + toMin(sl.start)
     if (!best || score < best.score) best = { score, sl, delta }
   }
-  return { ...best, date: iso(addDays(new Date(), best.delta)) }
+  return { ...best, date: iso(addDays(nowDate(), best.delta)) }
 }
 
 function nextLesson(s) {
@@ -390,7 +421,7 @@ function PaymentForm({ student, onSave, onClose }) {
     e.preventDefault()
     const a = Number(amount) || 0
     if (a <= 0) return
-    onSave({ date: new Date().toISOString().slice(0, 10), amount: a })
+    onSave({ date: nowDate().toISOString().slice(0, 10), amount: a })
   }
   const lessons = student.rate > 0 ? Math.floor((Number(amount) || 0) / student.rate) : 0
   return (
@@ -414,7 +445,7 @@ function PaymentForm({ student, onSave, onClose }) {
 function LessonForm({ students, defaultDate, onSave, onClose }) {
   const [f, setF] = useState({
     studentId: students[0]?.id || '',
-    date: defaultDate || iso(new Date()),
+    date: defaultDate || iso(nowDate()),
     start: '16:00', dur: 60, weekly: true, type: '',
   })
   const set = (k, v) => setF(p => ({ ...p, [k]: v }))
@@ -690,13 +721,19 @@ function layoutLanes(items) {
 }
 
 function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, onToggleDone }) {
-  const todayIso = iso(new Date())
+  const todayIso = iso(nowDate())
   // на телефоне показываем только диапазон часов, где есть уроки
   const compact = typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches
 
   const autoPaid = useMemo(() => {
     const m = new Map()
     students.forEach(s => m.set(s.id, autoPaidKeys(s)))
+    return m
+  }, [students])
+
+  const unpaidDone = useMemo(() => {
+    const m = new Map()
+    students.forEach(s => m.set(s.id, unpaidDoneKeys(s)))
     return m
   }, [students])
 
@@ -730,11 +767,13 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
       const cancelled = !!entry && entry.kind === 'cancelled'
       return {
         ...l, key, paid, done, cancelled,
-        covered: !!(entry && entry.covered),
+        // проведённый урок оплачен, если он не в числе неоплаченных (долговых)
+        covered: done && (entry.paidBy === 'balance' || entry.paidBy == null) && entry.charged !== false
+          && !unpaidDone.get(l.student.id).has(key),
         autoPaid: !paid && !done && !cancelled && autoPaid.get(l.student.id).has(key),
       }
     })
-  }, [students, dates, autoPaid])
+  }, [students, dates, autoPaid, unpaidDone])
 
   // десктоп: фиксированно 7:00–21:00 (расширяется при уроках вне);
   // телефон: только диапазон, где есть уроки — блоки крупнее
@@ -796,7 +835,7 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
                   <div className="hline" key={h} style={{ top: (h - minH) * pxh }} />
                 ))}
                 {dayItems.map(l => (
-                  <div className={'lesson' + (l.type === 'Пробный' ? ' trial' : '') + (l.done ? ' isdone' : '') + (l.cancelled ? ' iscancel' : '')} key={l.key + l.student.id}
+                  <div className={'lesson' + (l.type === 'Пробный' ? ' trial' : '') + (l.done ? ' isdone' : '') + (l.cancelled ? ' iscancel' : '') + (l.dur < 45 ? ' shortl' : '')} key={l.key + l.student.id}
                     role="button" tabIndex={0}
                     onClick={() => onLessonClick(l)}
                     onKeyDown={e => { if (e.key === 'Enter') onLessonClick(l) }}
@@ -852,7 +891,7 @@ function LessonDialog({ student: s, lesson, onSave, onOpenProfile, onToggleMark,
   const prevEntry = (s.log || []).find(e => e.date === lesson.date && e.start === lesson.start)
   const initialStatus = prevEntry ? (prevEntry.kind === 'cancelled' ? 'cancelled' : 'done') : 'none'
   // правило 24 часов: отмена меньше чем за сутки — со списанием (можно поменять вручную)
-  const under24 = new Date(lesson.date + 'T' + lesson.start).getTime() - Date.now() < 24 * 3600 * 1000
+  const under24 = new Date(lesson.date + 'T' + lesson.start).getTime() - nowDate().getTime() < 24 * 3600 * 1000
   const [status, setStatus] = useState(initialStatus)
   const [charge, setCharge] = useState(
     prevEntry && prevEntry.kind === 'cancelled' ? prevEntry.charged !== false : under24
@@ -984,7 +1023,7 @@ function BarChart({ data, money }) {
 function PaymentsView({ students, onOpen, onPay, onTick }) {
   const waiting = students.filter(s => payStatus(s).k !== 'paid')
   const lessonsWeek = students.reduce((n, s) => n + (s.slots || []).length, 0)
-  const thisMonth = new Date().toISOString().slice(0, 7)
+  const thisMonth = nowDate().toISOString().slice(0, 7)
   const monthIncome = students.reduce((sum, s) =>
     sum + (s.payments || []).filter(p => p.date && p.date.slice(0, 7) === thisMonth)
       .reduce((a, p) => a + (p.amount || 0), 0), 0)
@@ -993,7 +1032,7 @@ function PaymentsView({ students, onOpen, onPay, onTick }) {
 
   // последние 6 месяцев: доход и проведённые уроки
   const months = [...Array(6)].map((_, i) => {
-    const d = new Date()
+    const d = nowDate()
     d.setDate(1)
     d.setMonth(d.getMonth() - 5 + i)
     return { ym: iso(d).slice(0, 7), label: MONTHS[d.getMonth()] }
@@ -1188,12 +1227,24 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
   const [payingId, setPayingId] = useState(null)
   const [addingLesson, setAddingLesson] = useState(false)
   const [lessonDlg, setLessonDlg] = useState(null) // { studentId, lesson }
-  const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()))
+  const [weekStart, setWeekStart] = useState(() => mondayOf(nowDate()))
   const [weekFilter, setWeekFilter] = useState('') // '' = все ученики
+  // часовой пояс: смена пересчитывает «сегодня», подсветку и правило 24 ч
+  const [tz, setTzState] = useState(APP_TZ)
+  const tzZones = useMemo(() => {
+    try { return Intl.supportedValuesOf('timeZone') } catch { return [] }
+  }, [])
+  const changeTz = v => {
+    APP_TZ = v
+    try { v ? localStorage.setItem('atc-tz', v) : localStorage.removeItem('atc-tz') } catch { /* приватный режим */ }
+    setTzState(v)
+    setDayDate(iso(nowDate()))
+    setWeekStart(mondayOf(nowDate()))
+  }
   // «День» по умолчанию на телефоне — одна широкая колонка с галочками
   const [calScope, setCalScope] = useState(() =>
     (typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches ? 'day' : 'week'))
-  const [dayDate, setDayDate] = useState(() => iso(new Date()))
+  const [dayDate, setDayDate] = useState(() => iso(nowDate()))
   const calDates = calScope === 'day'
     ? [new Date(dayDate + 'T00:00')]
     : DAYS.map((_, i) => addDays(weekStart, i))
@@ -1201,7 +1252,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
     if (calScope === 'day') setDayDate(iso(addDays(new Date(dayDate + 'T00:00'), n)))
     else setWeekStart(w => addDays(w, 7 * n))
   }
-  const calToday = () => { setDayDate(iso(new Date())); setWeekStart(mondayOf(new Date())) }
+  const calToday = () => { setDayDate(iso(nowDate())); setWeekStart(mondayOf(nowDate())) }
   const calPick = v => {
     if (!v) return
     setDayDate(v)
@@ -1226,15 +1277,26 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
     dataRef.current = data
     if (mode !== 'server') { persist(data); return }
     if (skipNextSave.current) { skipNextSave.current = false; return }
+    // каждое изменение отправляется на сервер сразу
     dirtyRef.current = true
-    const t = setTimeout(() => {
-      api('save', { token, data })
-        .then(() => { dirtyRef.current = false })
-        .catch(e => { if (e.status === 401) onAuthFail() })
-    }, 600)
-    return () => clearTimeout(t)
+    api('save', { token, data })
+      .then(() => { dirtyRef.current = false })
+      .catch(e => { if (e.status === 401) onAuthFail() })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data])
+
+  // авто-обновление: раз в минуту подтягиваем свежие данные (если нет своих правок)
+  useEffect(() => {
+    if (mode !== 'server') return
+    const id = setInterval(() => {
+      if (document.visibilityState !== 'visible' || dirtyRef.current) return
+      api('get', { token })
+        .then(r => { skipNextSave.current = true; setData(r.data && typeof r.data === 'object' ? r.data : {}) })
+        .catch(() => {})
+    }, 60000)
+    return () => clearInterval(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // при сворачивании/закрытии — мгновенно дослать несохранённое;
   // при возврате на вкладку — подтянуть свежие данные с сервера
@@ -1291,7 +1353,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
       const used = students.map(s => s.colorIdx % COLORS.length)
       let colorIdx = 0
       while (used.includes(colorIdx) && colorIdx < COLORS.length) colorIdx++
-      save(id, applyBase({ ...form, colorIdx: colorIdx % COLORS.length, createdAt: new Date().toISOString() }))
+      save(id, applyBase({ ...form, colorIdx: colorIdx % COLORS.length, createdAt: nowDate().toISOString() }))
       setOpenId(id)
     } else {
       save(editing, applyBase({ ...byId(editing), ...form }))
@@ -1337,7 +1399,6 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
         kind: status, charged: willCharge,
         paidBy: willCharge ? 'balance' : undefined,
         amount: willCharge ? (next.rate || 0) : undefined,
-        covered: (willCharge && lesson.autoPaid) || undefined,
         hw: text || undefined,
         book: (bm || '').trim() || undefined,
       }]
@@ -1406,7 +1467,6 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
       next.log = [...(s.log || []), {
         date: lesson.date, start: lesson.start, dur: lesson.dur, type: lesson.type,
         kind: 'done', charged: true, paidBy: 'balance', amount: next.rate || 0,
-        covered: lesson.autoPaid || undefined, // был покрыт предоплатой — галочка «оплачен» остаётся
       }]
     }
     save(s.id, withLedger(next))
@@ -1581,14 +1641,21 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
 
       {addingLesson && (
         <LessonForm students={students}
-          defaultDate={iso(weekStart) === iso(mondayOf(new Date())) ? iso(new Date()) : iso(weekStart)}
+          defaultDate={iso(weekStart) === iso(mondayOf(nowDate())) ? iso(nowDate()) : iso(weekStart)}
           onSave={handleLessonAdd} onClose={() => setAddingLesson(false)} />
       )}
 
       <p className="storage-note">
         {mode === 'server'
-          ? 'Данные сохраняются на сервере — доступны с любого устройства.'
+          ? 'Данные сохраняются на сервере сразу после каждого изменения.'
           : 'Данные хранятся в этом браузере.'}
+      </p>
+      <p className="storage-note tzline">
+        Часовой пояс расписания:{' '}
+        <select value={tz} onChange={e => changeTz(e.target.value)} aria-label="Часовой пояс расписания">
+          <option value="">Авто — {deviceTz || 'устройство'}</option>
+          {tzZones.map(z => <option key={z} value={z}>{z}</option>)}
+        </select>
       </p>
 
       <nav className="bottombar" aria-label="Разделы">
@@ -1756,7 +1823,7 @@ function StudentApp({ join }) {
   if (!stu) return <div className="app"><p style={{ color: 'var(--muted)' }}>Загрузка…</p></div>
 
   const slots = (stu.slots || []).slice().sort((a, b) => a.day - b.day || toMin(a.start) - toMin(b.start))
-  const todayStr = iso(new Date())
+  const todayStr = iso(nowDate())
   const upcoming = (stu.extra || []).filter(ex => ex.date >= todayStr)
     .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start))
 
