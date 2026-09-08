@@ -278,8 +278,7 @@ function nextLesson(s) {
   const tomorrow = iso(addDays(nowDate(), 1))
   const when = loc.date === today ? 'сегодня' : loc.date === tomorrow ? 'завтра'
     : DAYS[(new Date(loc.date + 'T00:00').getDay() + 6) % 7]
-  const z = zoneText(n.date, n.sl.start)
-  return `${when} в ${loc.time}${z ? ` (${z})` : ''}`
+  return `${when} в ${loc.time}`
 }
 
 /* ---------- API (сервер, когда рядом лежит api.php) ---------- */
@@ -1044,7 +1043,7 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
                       '--stu': COLORS[l.student.colorIdx % COLORS.length],
                     }}>
                     <b>{l.cancelled ? '✕ ' : ''}{l.student.name}</b>
-                    <span>{l.lstart}–{hm(l.startMin + l.dur)}<LocalNote date={l.date} start={l.start} />{l.type ? ' · ' + l.type : ''}{l.once ? ' · разовый' : ''}{l.moved ? ' · перенесён' : ''}</span>
+                    <span>{l.lstart}–{hm(l.startMin + l.dur)}{l.type ? ' · ' + l.type : ''}{l.once ? ' · разовый' : ''}{l.moved ? ' · перенесён' : ''}</span>
                     <span className="lticks">
                       <button
                         className={'ltick blue' + (l.done ? ' on' : '')}
