@@ -1872,6 +1872,8 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
           onSave={handleLessonAdd} onClose={() => setAddingLesson(false)} />
       )}
 
+      <details className="settings">
+        <summary>Настройки</summary>
       <p className="storage-note">
         {mode === 'server'
           ? 'Данные сохраняются на сервере сразу после каждого изменения.'
@@ -1898,6 +1900,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
             aria-pressed={showTz.includes(z)} onClick={() => toggleShowTz(z)}>{flag} {name}</button>
         ))}
       </p>
+      </details>
 
       <nav className="bottombar" aria-label="Разделы">
         <button className={tab === 'students' ? 'on' : ''} onClick={() => showTab('students')}>

@@ -462,6 +462,17 @@ table.pay td.mutedcell { color: var(--muted); }
 
 .storage-note { color: var(--muted); font-size: 12.5px; margin-top: 28px; text-align: center; }
 .storage-note.tzline { margin-top: 8px; }
+/* свёрнутые настройки в футере */
+.settings { margin-top: 28px; text-align: center; }
+.settings > summary {
+  display: inline-block; cursor: pointer; list-style: none; color: var(--muted);
+  font-size: 12.5px; font-weight: 600; padding: 6px 14px; border: 1px solid var(--line);
+  border-radius: 999px; background: var(--surface); user-select: none;
+}
+.settings > summary::-webkit-details-marker { display: none; }
+.settings > summary::after { content: ' ▾'; }
+.settings[open] > summary::after { content: ' ▴'; }
+.settings > .storage-note { margin-top: 12px; }
 .localnote { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .tzline.chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; align-items: center; }
 .chip {
