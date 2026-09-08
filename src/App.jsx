@@ -739,7 +739,7 @@ function ProfileView({ student: s, onBack, onEdit, onPay, onRemoveExtra, onRemov
 }
 
 /* ---------- week view ---------- */
-const PX_PER_HOUR = 42
+const PX_PER_HOUR = 54
 const DAY_START = 7  // календарь всегда показывает 7:00–21:00 целиком
 const DAY_END = 21
 
@@ -887,7 +887,7 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
                     onKeyDown={e => { if (e.key === 'Enter') onLessonClick(l) }}
                     style={{
                       top: (l.startMin - minH * 60) / 60 * pxh + 1,
-                      height: Math.max(l.dur / 60 * pxh - 3, compact ? 52 : 0),
+                      height: Math.max(l.dur / 60 * pxh - 3, compact ? 52 : 36),
                       left: `calc(${(100 / l.lanes) * l.lane}% + 3px)`,
                       width: `calc(${100 / l.lanes}% - 6px)`,
                       '--stu': COLORS[l.student.colorIdx % COLORS.length],
