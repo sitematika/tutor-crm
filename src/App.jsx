@@ -877,7 +877,7 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
                       >✓</button>
                       <button
                         className={'ltick green' + (l.paid || l.autoPaid || l.covered ? ' on' : '')}
-                        disabled={l.autoPaid || l.covered}
+                        disabled={(l.autoPaid || l.covered) && !l.paid}
                         title={l.covered
                           ? 'Оплачен предоплатой со счёта (урок проведён)'
                           : l.autoPaid
