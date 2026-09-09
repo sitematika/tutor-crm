@@ -981,7 +981,7 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
                     {l.type && <span className="lvl">{l.type}</span>}
                     {l.moved && <span className="lvl">перенесён</span>}
                     {l.once && <span className="lvl">разовый</span>}
-                    {l.cancelled && <span className="lvl">отменён</span>}
+                    {l.cancelled && <span className="lvl bad">✕ Отменён</span>}
                   </div>
                   <div className="agmoney">
                     <Pill student={s} />
@@ -1050,8 +1050,9 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
                       width: `calc(${100 / l.lanes}% - 6px)`,
                       '--stu': COLORS[l.student.colorIdx % COLORS.length],
                     }}>
-                    <b>{l.cancelled ? '✕ ' : ''}{l.student.name}</b>
+                    <b>{l.student.name}</b>
                     <span>{l.lstart}–{hm(l.startMin + l.dur)}{l.type ? ' · ' + l.type : ''}{l.once ? ' · разовый' : ''}{l.moved ? ' · перенесён' : ''}</span>
+                    {l.cancelled && <em className="lcancel">Отменён</em>}
                     <span className="lticks">
                       <button
                         className={'ltick blue' + (l.done ? ' on' : '')}

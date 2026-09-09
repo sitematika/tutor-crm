@@ -229,7 +229,10 @@ nav.tabs button.on { background: var(--accent); color: var(--accent-ink); }
 }
 .agcard:hover { border-color: var(--accent); }
 .agcard.isdone { opacity: 0.78; }
-.agcard.iscancel { opacity: 0.6; }
+.agcard.iscancel { border-bottom: 3px solid var(--bad); background: color-mix(in oklab, var(--bad) 7%, var(--surface)); }
+.agcard.iscancel .agname b { color: var(--bad); text-decoration: line-through; text-decoration-thickness: 1.5px; }
+.agcard.iscancel .agticks { display: none; }
+.lvl.bad { color: var(--bad); background: var(--bad-bg); }
 .agtime { display: flex; flex-direction: column; font-variant-numeric: tabular-nums; line-height: 1.25; }
 .agtime b { font-size: 18px; font-weight: 800; }
 .agtime span { color: var(--muted); font-size: 12px; }
@@ -306,18 +309,27 @@ nav.tabs button.on { background: var(--accent); color: var(--accent-ink); }
 .lesson {
   position: absolute; border-radius: 7px; padding: 3px 7px; overflow: hidden;
   background: color-mix(in oklab, var(--stu) 16%, var(--surface));
-  border-left: 3px solid var(--stu);
   font-size: 11.5px; line-height: 1.25; cursor: pointer;
 }
 .lesson.isdone { opacity: 0.55; }
 .lesson.isdone b { text-decoration: line-through; text-decoration-thickness: 1px; }
+/* отменённый урок: красная полоса снизу, зачёркнутое имя, без галочек */
+.lesson.iscancel {
+  opacity: 1; padding-right: 7px;
+  background: color-mix(in oklab, var(--bad) 12%, var(--surface));
+  border-bottom: 3px solid var(--bad);
+}
+.lesson.iscancel b { color: var(--bad); text-decoration: line-through; text-decoration-thickness: 1.5px; padding-right: 52px; }
+.lesson.iscancel .lticks { display: none; }
+.lcancel {
+  position: absolute; top: 3px; right: 6px; font-size: 9.5px; font-weight: 800;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--bad);
+}
+.lesson.shortl .lcancel { position: static; margin-left: auto; }
 .lesson { padding-right: 46px; }
 .lesson b { display: block; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lesson span { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 10.5px; }
-.lesson.trial {
-  border-left-color: var(--warn);
-  background: color-mix(in oklab, var(--warn) 14%, var(--surface));
-}
+.lesson.trial:not(.iscancel) { background: color-mix(in oklab, var(--warn) 14%, var(--surface)); }
 .lticks { position: absolute; top: 3px; right: 3px; display: flex; gap: 3px; }
 .ltick {
   width: 18px; height: 18px; padding: 0;
@@ -533,6 +545,8 @@ table.pay td.mutedcell { color: var(--muted); }
   .seg.scopeseg button { flex: 1; }
   .lticks { flex-direction: column; gap: 2px; }
   .lesson { padding-right: 26px; }
+  .lesson.iscancel b { padding-right: 0; }
+  .lcancel { position: static; display: block; margin-top: 1px; }
   /* календарь скроллится по вертикали, шапка дней прилипает */
   .week-wrap { max-height: calc(100dvh - 330px); overflow-y: auto; }
   .wh { position: sticky; top: 0; background: var(--surface); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); z-index: 3; }
