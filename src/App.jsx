@@ -64,6 +64,14 @@ const toLocal = (date, time) => {
     return { date: ld, time: lt, min: q.hh * 60 + q.mm, same: ld === date && lt === time }
   } catch { return same }
 }
+/* местные дата+время → в пояс расписания (для ввода переносов и новых уроков) */
+const toSched = (date, time) => {
+  if (!SCHED_TZ || SCHED_TZ === localTz()) return { date, time }
+  try {
+    const q = tzParts(zonedToUtc(date, time, localTz()), SCHED_TZ)
+    return { date: `${q.y}-${String(q.m).padStart(2, '0')}-${String(q.d).padStart(2, '0')}`, time: hm(q.hh * 60 + q.mm) }
+  } catch { return { date, time } }
+}
 const TZ_CITY = {
   'Europe/Warsaw': 'Варшава', 'Asia/Tbilisi': 'Тбилиси', 'Europe/Kyiv': 'Киев', 'Europe/Kiev': 'Киев',
   'Europe/Berlin': 'Берлин', 'Europe/London': 'Лондон', 'Europe/Istanbul': 'Стамбул', 'Asia/Yerevan': 'Ереван',
@@ -478,7 +486,7 @@ function StudentForm({ initial, onSave, onClose, onDelete }) {
           <input id="f-bookmark" value={f.bookmark || ''} onChange={e => set('bookmark', e.target.value)} placeholder="Учебник, страница или юнит…" />
         </div>
         <div className="field">
-          <label>Расписание</label>
+          <label>Расписание{SCHED_TZ !== localTz() ? ` — время по поясу расписания (${tzCity(SCHED_TZ)})` : ''}</label>
           {f.slots.map((s, i) => (
             <div className="slot-edit" key={i}>
               <select className="day" value={s.day} aria-label="День недели" onChange={e => setSlot(i, 'day', Number(e.target.value))}>
@@ -573,11 +581,11 @@ function LessonForm({ students, defaultDate, onSave, onClose }) {
         </div>
         <div className="frow">
           <div className="field">
-            <label htmlFor="l-date">Дата</label>
+            <label htmlFor="l-date">Дата (местное время)</label>
             <input id="l-date" type="date" value={f.date} onChange={e => set('date', e.target.value)} />
           </div>
           <div className="field">
-            <label htmlFor="l-start">Начало</label>
+            <label htmlFor="l-start">Начало (местное)</label>
             <input id="l-start" type="time" value={f.start} onChange={e => set('start', e.target.value)} />
           </div>
           <div className="field">
@@ -1086,8 +1094,10 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
 
 /* ---------- окно урока в календаре ---------- */
 function LessonDialog({ student: s, lesson, onSave, onOpenProfile, onToggleMark, onToggleHw, onMove, onUnmove, onClose }) {
-  const [mvDate, setMvDate] = useState(lesson.date)
-  const [mvStart, setMvStart] = useState(lesson.start)
+  // перенос вводится в МЕСТНОМ времени (как показано в шапке окна)
+  const locStart = toLocal(lesson.date, lesson.start)
+  const [mvDate, setMvDate] = useState(locStart.date)
+  const [mvStart, setMvStart] = useState(locStart.time)
   const prevEntry = (s.log || []).find(e => e.date === lesson.date && e.start === lesson.start)
   const initialStatus = prevEntry ? (prevEntry.kind === 'cancelled' ? 'cancelled' : 'done') : 'none'
   // правило 24 часов: отмена меньше чем за сутки — со списанием (можно поменять вручную)
@@ -1182,12 +1192,12 @@ function LessonDialog({ student: s, lesson, onSave, onOpenProfile, onToggleMark,
             placeholder="Ученик увидит это в своём кабинете" />
         </div>
         <div className="field" style={{ marginTop: 10 }}>
-          <label>Перенос урока (только эта дата, расписание не меняется)</label>
+          <label>Перенос урока — местное время (только эта дата, расписание не меняется)</label>
           <div className="slot-edit" style={{ marginBottom: 0 }}>
             <input type="date" value={mvDate} aria-label="Новая дата" onChange={e => setMvDate(e.target.value)} />
             <input className="time" type="time" value={mvStart} aria-label="Новое время" onChange={e => setMvStart(e.target.value)} />
             <button type="button" className="btn sm"
-              disabled={mvDate === lesson.date && mvStart === lesson.start}
+              disabled={mvDate === locStart.date && mvStart === locStart.time}
               onClick={() => onMove(s, lesson, mvDate, mvStart)}>Перенести</button>
             {lesson.moved && (
               <button type="button" className="btn ghost sm" onClick={() => onUnmove(s, lesson)}>Вернуть на место</button>
@@ -1496,11 +1506,15 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
     dataRef.current = data
     if (mode !== 'server') { persist(data); return }
     if (skipNextSave.current) { skipNextSave.current = false; return }
-    // каждое изменение отправляется на сервер сразу
+    // каждое изменение отправляется на сервер сразу; при сбое сети — повтор
     dirtyRef.current = true
-    api('save', { token, data })
-      .then(() => { dirtyRef.current = false })
-      .catch(e => { if (e.status === 401) onAuthFail() })
+    const attempt = tries => api('save', { token, data: dataRef.current })
+      .then(() => { if (dataRef.current === data) dirtyRef.current = false })
+      .catch(e => {
+        if (e.status === 401) { onAuthFail(); return }
+        if (tries < 5) setTimeout(() => attempt(tries + 1), 3000 * (tries + 1))
+      })
+    attempt(0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data])
 
@@ -1508,7 +1522,12 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
   useEffect(() => {
     if (mode !== 'server') return
     const id = setInterval(() => {
-      if (document.visibilityState !== 'visible' || dirtyRef.current) return
+      if (document.visibilityState !== 'visible') return
+      if (dirtyRef.current) {
+        // несохранённое есть — досылаем его, а не затираем свежими данными
+        api('save', { token, data: dataRef.current }).then(() => { dirtyRef.current = false }).catch(() => {})
+        return
+      }
       api('get', { token })
         .then(r => { skipNextSave.current = true; setData(r.data && typeof r.data === 'object' ? r.data : {}) })
         .catch(() => {})
@@ -1531,7 +1550,10 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
     }
     const onVis = () => {
       if (document.visibilityState === 'hidden') { flush(); return }
-      if (dirtyRef.current) return // свои несохранённые правки важнее
+      if (dirtyRef.current) { // свои несохранённые правки важнее — досылаем их
+        api('save', { token, data: dataRef.current }).then(() => { dirtyRef.current = false }).catch(() => {})
+        return
+      }
       api('get', { token })
         .then(r => { skipNextSave.current = true; setData(r.data && typeof r.data === 'object' ? r.data : {}) })
         .catch(() => {})
@@ -1645,11 +1667,12 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
     const s = byId(f.studentId)
     if (s) {
       const type = f.type || undefined
+      const sc = toSched(f.date, f.start) // введено в местном времени — храним по расписанию
       if (f.weekly) {
-        const day = (new Date(f.date + 'T00:00').getDay() + 6) % 7
-        save(s.id, { ...s, slots: [...(s.slots || []), { day, start: f.start, dur: f.dur, type }] })
+        const day = (new Date(sc.date + 'T00:00').getDay() + 6) % 7
+        save(s.id, { ...s, slots: [...(s.slots || []), { day, start: sc.time, dur: f.dur, type }] })
       } else {
-        save(s.id, { ...s, extra: [...(s.extra || []), { date: f.date, start: f.start, dur: f.dur, type }] })
+        save(s.id, { ...s, extra: [...(s.extra || []), { date: sc.date, start: sc.time, dur: f.dur, type }] })
       }
       setWeekStart(mondayOf(new Date(f.date + 'T00:00')))
       setDayDate(f.date)
@@ -1705,8 +1728,10 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
     save(s.id, { ...s, extra: (s.extra || []).filter((_, j) => j !== i) })
 
   // перенос: разовый урок правится на месте, у слота появляется move на конкретную дату
-  const handleMove = (s, lesson, date, start) => {
-    if (!date || !start) return
+  const handleMove = (s, lesson, localDate, localStart) => {
+    if (!localDate || !localStart) return
+    const sc = toSched(localDate, localStart) // в данных — пояс расписания
+    const date = sc.date, start = sc.time
     const next = { ...s }
     if (lesson.once) {
       next.extra = (s.extra || []).map(e =>
