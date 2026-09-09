@@ -605,18 +605,21 @@ function LessonForm({ students, defaultDate, onSave, onClose }) {
             </select>
           </div>
         </div>
-        <label className="check-line">
-          <input type="checkbox" checked={f.weekly} onChange={e => set('weekly', e.target.checked)} />
-          <span>Повторять каждую неделю{dayName ? ` (${dayName})` : ''}</span>
-        </label>
+        <div className="field">
+          <label>Повторение</label>
+          <div className="seg" role="radiogroup" aria-label="Повторение урока">
+            <button type="button" className={f.weekly ? '' : 'on'} onClick={() => set('weekly', false)}>Разовый урок</button>
+            <button type="button" className={f.weekly ? 'on' : ''} onClick={() => set('weekly', true)}>Каждую неделю{dayName ? ` · ${dayName}` : ''}</button>
+          </div>
+        </div>
         <p className="hint">
           {f.weekly
-            ? 'Урок добавится в еженедельное расписание ученика.'
-            : 'Разовый урок — появится только на выбранной дате.'}
+            ? 'Урок добавится в постоянное расписание ученика и будет повторяться каждую неделю.'
+            : 'Разовый урок — появится только на выбранной дате, в постоянное расписание не попадёт.'}
         </p>
         <div className="mfoot">
           <button type="button" className="btn" onClick={onClose}>Отмена</button>
-          <button type="submit" className="btn primary">Добавить урок</button>
+          <button type="submit" className="btn primary">{f.weekly ? 'Добавить в расписание' : 'Добавить разовый урок'}</button>
         </div>
       </form>
     </Modal>
