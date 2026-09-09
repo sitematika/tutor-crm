@@ -1436,6 +1436,46 @@ function useTheme() {
 }
 
 /* ---------- app ---------- */
+/* Всё, что привязано к уроку (оплата, «проведён», домашка, прогресс),
+   переезжает вместе с ним на новую дату/время */
+function rekeyStudent(st, fromKey, toKey) {
+  if (fromKey === toKey) return st
+  const [fd, fs] = fromKey.split('|')
+  const [td, ts] = toKey.split('|')
+  const out = { ...st }
+  if ((st.marks || {})[fromKey]) {
+    const marks = { ...st.marks }
+    delete marks[fromKey]
+    marks[toKey] = true
+    out.marks = marks
+  }
+  out.payments = (st.payments || []).map(p => (p.lesson === fromKey ? { ...p, lesson: toKey, date: td } : p))
+  out.log = (st.log || []).map(e => (e.date === fd && e.start === fs ? { ...e, date: td, start: ts } : e))
+  out.homeworks = (st.homeworks || []).map(h => (h.date === fd ? { ...h, date: td } : h))
+  return out
+}
+
+/* Самопочинка: у уроков, перенесённых до обновления, отметки остались на
+   старой дате — переносим их на новое место один раз при загрузке */
+function migrateMoves(data) {
+  let changed = false
+  const next = { ...data }
+  for (const [id, s] of Object.entries(data)) {
+    if (id.startsWith('_') || !s || !s.moves) continue
+    let st = s
+    for (const [orig, mv] of Object.entries(s.moves)) {
+      const toKey = mv.date + '|' + mv.start
+      const [od, os] = orig.split('|')
+      const stale = (st.marks || {})[orig]
+        || (st.payments || []).some(p => p.lesson === orig)
+        || (st.log || []).some(e => e.date === od && e.start === os)
+      if (stale) { st = rekeyStudent(st, orig, toKey); changed = true }
+    }
+    if (st !== s) next[id] = st
+  }
+  return { changed, next }
+}
+
 function Crm({ mode, token, onLogout, onAuthFail }) {
   const [data, setData] = useState(() => (mode === 'server' ? null : loadData()))
   const [tab, setTab] = useState('students')
@@ -1728,23 +1768,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
     save(s.id, { ...s, extra: (s.extra || []).filter((_, j) => j !== i) })
 
   // перенос: разовый урок правится на месте, у слота появляется move на конкретную дату
-  // всё, что привязано к уроку (оплата, «проведён», домашка, прогресс), переезжает вместе с ним
-  const rekey = (st, fromKey, toKey) => {
-    if (fromKey === toKey) return st
-    const [fd, fs] = fromKey.split('|')
-    const [td, ts] = toKey.split('|')
-    const out = { ...st }
-    if ((st.marks || {})[fromKey]) {
-      const marks = { ...st.marks }
-      delete marks[fromKey]
-      marks[toKey] = true
-      out.marks = marks
-    }
-    out.payments = (st.payments || []).map(p => (p.lesson === fromKey ? { ...p, lesson: toKey, date: td } : p))
-    out.log = (st.log || []).map(e => (e.date === fd && e.start === fs ? { ...e, date: td, start: ts } : e))
-    out.homeworks = (st.homeworks || []).map(h => (h.date === fd ? { ...h, date: td } : h))
-    return out
-  }
+  const rekey = rekeyStudent
 
   const handleMove = (s, lesson, localDate, localStart) => {
     if (!localDate || !localStart) return
@@ -1780,6 +1804,13 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
   }
 
   const handleMakeJoin = s => save(s.id, { ...s, join: uid() + uid() })
+
+  // самопочинка привязок у ранее перенесённых уроков (см. migrateMoves)
+  useEffect(() => {
+    if (!data) return
+    const { changed, next } = migrateMoves(data)
+    if (changed) setData(next)
+  }, [data])
 
   const showTab = t => { setTab(t); setOpenId(null) }
 
