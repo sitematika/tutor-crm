@@ -256,9 +256,9 @@ function payStatus(s) {
   if (rate > 0 && b >= rate) return { k: 'paid', label: `Наперёд · ${Math.floor(b / rate)} ур.` }
   const next = nextLessonInfo(s)
   const nextPaid = next && (s.marks || {})[next.date + '|' + next.sl.start]
-  if (nextPaid) return { k: 'paid', label: 'Оплачено ✓' }
+  if (nextPaid) return { k: 'paid', label: 'Следующий оплачен ✓' }
   if (b > 0) return { k: 'due', label: 'Мало на счету' }
-  return { k: 'paid', label: 'Всё оплачено' }
+  return { k: 'paid', label: 'Долга нет' }
 }
 
 /* Ближайший урок ученика (слот + конкретная дата) */
