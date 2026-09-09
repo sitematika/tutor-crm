@@ -1728,11 +1728,29 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
     save(s.id, { ...s, extra: (s.extra || []).filter((_, j) => j !== i) })
 
   // перенос: разовый урок правится на месте, у слота появляется move на конкретную дату
+  // всё, что привязано к уроку (оплата, «проведён», домашка, прогресс), переезжает вместе с ним
+  const rekey = (st, fromKey, toKey) => {
+    if (fromKey === toKey) return st
+    const [fd, fs] = fromKey.split('|')
+    const [td, ts] = toKey.split('|')
+    const out = { ...st }
+    if ((st.marks || {})[fromKey]) {
+      const marks = { ...st.marks }
+      delete marks[fromKey]
+      marks[toKey] = true
+      out.marks = marks
+    }
+    out.payments = (st.payments || []).map(p => (p.lesson === fromKey ? { ...p, lesson: toKey, date: td } : p))
+    out.log = (st.log || []).map(e => (e.date === fd && e.start === fs ? { ...e, date: td, start: ts } : e))
+    out.homeworks = (st.homeworks || []).map(h => (h.date === fd ? { ...h, date: td } : h))
+    return out
+  }
+
   const handleMove = (s, lesson, localDate, localStart) => {
     if (!localDate || !localStart) return
     const sc = toSched(localDate, localStart) // в данных — пояс расписания
     const date = sc.date, start = sc.time
-    const next = { ...s }
+    let next = { ...s }
     if (lesson.once) {
       next.extra = (s.extra || []).map(e =>
         e.date === lesson.date && e.start === lesson.start ? { ...e, date, start } : e)
@@ -1740,7 +1758,8 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
       const origKey = lesson.moved ? lesson.origKey : lessonKey(lesson)
       next.moves = { ...(s.moves || {}), [origKey]: { date, start, dur: lesson.dur } }
     }
-    save(s.id, next)
+    next = rekey(next, lessonKey(lesson), date + '|' + start)
+    save(s.id, withLedger(next))
     setWeekStart(mondayOf(new Date(date + 'T00:00')))
     setDayDate(date)
     setLessonDlg(null)
@@ -1749,7 +1768,8 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
   const handleUnmove = (s, lesson) => {
     const moves = { ...(s.moves || {}) }
     delete moves[lesson.origKey]
-    save(s.id, { ...s, moves })
+    const next = rekey({ ...s, moves }, lessonKey(lesson), lesson.origKey)
+    save(s.id, withLedger(next))
     setLessonDlg(null)
   }
 
