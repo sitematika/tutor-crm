@@ -183,20 +183,34 @@ const statementRows = s => {
   let run = s.adjust || 0
   return rows.map(r => { run += r.delta; return { ...r, run } })
 }
+/* Деньги, зачисленные галочкой «оплачен» за ещё не проведённый урок,
+   закреплены за этим уроком: они не гасят чужой долг и не покрывают
+   другие занятия. Свободные деньги на счету = баланс − закреплённые. */
+const reservedAmount = s => {
+  const rate = s.rate || 0
+  if (rate <= 0) return 0
+  const held = Object.keys(s.marks || {}).filter(k =>
+    (s.payments || []).some(p => p.auto && p.lesson === k) &&
+    !(s.log || []).some(e => e.date + '|' + e.start === k)
+  ).length
+  return held * rate
+}
+const avail = s => (s.balance || 0) - (s.reserved || 0)
 const withLedger = s => {
   const adjust = s.adjust != null ? s.adjust : (s.balance || 0) - sumPayments(s) + sumCharges(s)
-  return { ...s, adjust, balance: adjust + sumPayments(s) - sumCharges(s) }
+  return { ...s, adjust, balance: adjust + sumPayments(s) - sumCharges(s), reserved: reservedAmount(s) }
 }
 
 /* Неоплаченные из проведённых: при долге не оплачены ровно последние
-   ceil(долг/ставка) списанных уроков; без долга — все проведённые оплачены */
+   ceil(долг/ставка) списанных уроков (кроме отмеченных галочкой — за них
+   оплата пришла отдельно); без долга — все проведённые оплачены */
 function unpaidDoneKeys(s) {
   const rate = s.rate || 0
-  let n = rate > 0 ? Math.ceil(Math.max(0, -(s.balance || 0)) / rate) : 0
+  let n = rate > 0 ? Math.ceil(Math.max(0, -avail(s)) / rate) : 0
   const keys = new Set()
   if (n <= 0) return keys
   const entries = (s.log || [])
-    .filter(e => e.charged !== false && (e.paidBy === 'balance' || e.paidBy == null))
+    .filter(e => e.charged !== false && (e.paidBy === 'balance' || e.paidBy == null) && !(s.marks || {})[e.date + '|' + e.start])
     .sort((a, b) => (b.date + b.start).localeCompare(a.date + a.start))
   for (const e of entries) {
     if (n <= 0) break
@@ -206,17 +220,11 @@ function unpaidDoneKeys(s) {
   return keys
 }
 
-/* Будущие уроки, покрытые предоплатой на счету: первые floor(баланс/ставка)
+/* Будущие уроки, покрытые предоплатой на счету: первые floor(свободные/ставка)
    предстоящих занятий (без проведённых/отменённых и оплаченных вручную) */
 function autoPaidKeys(s) {
   const rate = s.rate || 0
-  // деньги, зачисленные галочкой за ещё не проведённые уроки, зарезервированы
-  // за этими уроками — они не покрывают другие занятия
-  const reserved = Object.keys(s.marks || {}).filter(k =>
-    (s.payments || []).some(p => p.auto && p.lesson === k) &&
-    !(s.log || []).some(e => e.date + '|' + e.start === k)
-  ).length
-  let n = rate > 0 ? Math.floor((s.balance || 0) / rate) - reserved : 0
+  let n = rate > 0 ? Math.floor(avail(s) / rate) : 0
   const keys = new Set()
   if (n <= 0) return keys
   const logged = new Set((s.log || []).map(e => e.date + '|' + e.start))
@@ -247,7 +255,7 @@ function autoPaidKeys(s) {
    проведённый урок не оплачен (счёт ушёл в минус); будущие уроки
    долгом не считаются — при нуле без долга ученик «рассчитан». */
 function payStatus(s) {
-  const b = s.balance || 0
+  const b = avail(s)
   const rate = s.rate || 0
   if (b < 0) {
     const cnt = rate > 0 ? Math.ceil(-b / rate) : 0
@@ -652,7 +660,7 @@ function StudentsView({ students, onOpen, onAdd }) {
               <div className="meta">
                 <span>{next ? 'Следующий урок: ' + next : 'Расписание не задано'}</span>
                 {s.bookmark && <span className="bookmark">📖 {s.bookmark}</span>}
-                <span>{fmtMoney(s.rate)} / урок · на счету {fmtMoney(s.balance)}</span>
+                <span>{fmtMoney(s.rate)} / урок · на счету {fmtMoney(avail(s))}</span>
               </div>
               <div className="foot">
                 <Pill student={s} />
@@ -684,7 +692,8 @@ function InviteLink({ join }) {
 
 function ProfileView({ student: s, onBack, onEdit, onPay, onRemoveExtra, onRemoveMove, serverMode, onMakeJoin, onToggleHw, onDeleteHw }) {
   const stmt = statementRows(s)
-  const lessonsLeft = s.rate > 0 && s.balance > 0 ? Math.floor(s.balance / s.rate) : 0
+  const free = avail(s)
+  const lessonsLeft = s.rate > 0 && free > 0 ? Math.floor(free / s.rate) : 0
   return (
     <div className="profile">
       <div className="phead">
@@ -781,9 +790,12 @@ function ProfileView({ student: s, onBack, onEdit, onPay, onRemoveExtra, onRemov
         <div className="pcol">
           <h4>Оплата</h4>
           <div className="balance-big">
-            <b>{fmtMoney(s.balance)}</b>
+            <b>{fmtMoney(free)}</b>
             <span>{lessonsLeft > 0 ? `≈ ${lessonsLeft} ур. наперёд` : 'на счету'}</span>
           </div>
+          {s.reserved > 0 && (
+            <p className="hint">Ещё {fmtMoney(s.reserved)} оплачено за отмеченные галочкой уроки — спишется, когда они пройдут.</p>
+          )}
           <Pill student={s} />
           <h4>Движения по счёту</h4>
           {stmt.length
@@ -988,7 +1000,7 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
                   </div>
                   <div className="agmoney">
                     <Pill student={s} />
-                    <span>на счету {fmtMoney(s.balance)} · {fmtMoney(s.rate)} / урок</span>
+                    <span>на счету {fmtMoney(avail(s))} · {fmtMoney(s.rate)} / урок</span>
                   </div>
                   {zoneText(l.date, l.start) && (
                     <div className="agline"><LocalNote date={l.date} start={l.start} bare /></div>
@@ -1170,7 +1182,7 @@ function LessonDialog({ student: s, lesson, onSave, onOpenProfile, onToggleMark,
           onClick={() => onToggleMark(s, lesson.key)}>
           {paid
             ? '✓ Урок оплачен'
-            : (s.balance || 0) >= (s.rate || 0) && s.rate > 0
+            : avail(s) >= (s.rate || 0) && s.rate > 0
               ? `Отметить: урок оплачен (−${fmtMoney(s.rate)} со счёта)`
               : `Отметить: урок оплачен (+${fmtMoney(s.rate)})`}
         </button>
@@ -1320,7 +1332,7 @@ function PaymentsView({ students, onOpen, onPay }) {
                     </span>
                   </td>
                   <td><Pill student={s} /></td>
-                  <td className="num strong">{fmtMoney(s.balance)}</td>
+                  <td className="num strong">{fmtMoney(avail(s))}</td>
                   <td className="num">{fmtMoney(s.rate)}</td>
                   <td className="mutedcell">{last ? fmtDate(last.date) + ' · ' + fmtMoney(last.amount) : '—'}</td>
                   <td className="num" onClick={e => e.stopPropagation()}>
@@ -1735,7 +1747,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
       next.payments = (s.payments || []).filter(p => !((p.auto || p.use) && p.lesson === key))
     } else {
       marks[key] = true
-      if (rate > 0 && (s.balance || 0) >= rate) {
+      if (rate > 0 && avail(s) >= rate) {
         // есть предоплата — урок оплачивается СО СЧЁТА: списание с записью в истории
         next.payments = [...(s.payments || []), { date: key.split('|')[0], amount: -rate, lesson: key, use: true }]
       } else {
@@ -2228,7 +2240,7 @@ function StudentApp({ join }) {
           <h4>Оплата</h4>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <Pill student={stu} />
-            <span style={{ color: 'var(--muted)' }}>на счету {fmtMoney(stu.balance)}</span>
+            <span style={{ color: 'var(--muted)' }}>на счету {fmtMoney(avail(stu))}</span>
           </div>
         </section>
       </div>

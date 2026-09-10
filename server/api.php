@@ -171,6 +171,7 @@ switch ($action) {
       'extra' => $s['extra'] ?? [],
       'moves' => $s['moves'] ?? new stdClass(),
       'balance' => $s['balance'] ?? 0,
+      'reserved' => $s['reserved'] ?? 0,
       'rate' => $s['rate'] ?? 0,
       'paidTick' => $s['paidTick'] ?? false,
     ]]);
