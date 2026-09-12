@@ -447,7 +447,7 @@ function StudentForm({ initial, onSave, onClose, onDelete }) {
   const submit = e => {
     e.preventDefault()
     if (!f.name.trim()) return
-    onSave({ ...f, name: f.name.trim(), rate: Number(f.rate) || 0, adjust: Number(f.adjust) || 0 })
+    onSave({ ...f, name: f.name.trim(), rate: Number(f.rate) || 0, adjust: Number(f.adjust) || 0, adjustSet: true })
   }
 
   return (
@@ -697,7 +697,7 @@ function InviteLink({ join }) {
   )
 }
 
-function ProfileView({ student: s, onBack, onEdit, onPay, onTogglePause, onRemoveExtra, onRemoveMove, serverMode, onMakeJoin, onToggleHw, onDeleteHw }) {
+function ProfileView({ student: s, onBack, onEdit, onPay, onTogglePause, onZeroBase, onRemoveExtra, onRemoveMove, serverMode, onMakeJoin, onToggleHw, onDeleteHw }) {
   const stmt = statementRows(s)
   const free = avail(s)
   const lessonsLeft = s.rate > 0 && free > 0 ? Math.floor(free / s.rate) : 0
@@ -807,7 +807,7 @@ function ProfileView({ student: s, onBack, onEdit, onPay, onTogglePause, onRemov
           )}
           <Pill student={s} />
           <h4>Движения по счёту</h4>
-          {stmt.length
+          {stmt.length || s.adjust
             ? (
               <div className="stmt">
                 <div className="stmt-row stmt-head">
@@ -826,7 +826,10 @@ function ProfileView({ student: s, onBack, onEdit, onPay, onTogglePause, onRemov
                 {s.adjust ? (
                   <div className="stmt-row stmt-base">
                     <span className="stmt-date">—</span>
-                    <span className="stmt-label">Начальный остаток (меняется в «Редактировать»)</span>
+                    <span className="stmt-label">
+                      Начальный остаток{' '}
+                      <button className="btn ghost sm" onClick={onZeroBase} title="Начальный остаток = 0; оплаты и уроки не трогаются">Обнулить</button>
+                    </span>
                     <span className="stmt-delta">{fmtMoney(s.adjust)}</span>
                     <span className="stmt-run">{fmtMoney(s.adjust)}</span>
                   </div>
@@ -1485,8 +1488,9 @@ function rekeyStudent(st, fromKey, toKey) {
 /* Самопочинка данных при загрузке (одноразовая, по факту):
    1) у уроков, перенесённых до обновления, отметки остались на старой дате —
       переносим их на новое место;
-   2) старое поле «На счету» в форме могло увести базу в минус ровно на сумму
-      оплат галочкой за ещё не проведённые уроки — это не долг, база = 0 */
+   2) старое поле «На счету» в форме могло увести базу в минус на сумму оплат
+      галочкой (ровно одна ставка или закреплённые за уроками деньги) — это не
+      долг, база = 0; базу, заданную новой формой явно (adjustSet), не трогаем */
 function repairData(data) {
   let changed = false
   const next = { ...data }
@@ -1494,7 +1498,9 @@ function repairData(data) {
     if (id.startsWith('_') || !s) continue
     let st = s
     const led = withLedger(st)
-    if (led.adjust < 0 && led.reserved > 0 && led.adjust === -led.reserved) {
+    const legacyArtifact = !st.adjustSet && led.adjust < 0 &&
+      (led.adjust === -led.reserved || -led.adjust === (st.rate || 0))
+    if (legacyArtifact) {
       st = { ...st, adjust: 0 }
       changed = true
     }
@@ -1887,6 +1893,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
           onEdit={() => setEditing(open.id)}
           onPay={() => setPayingId(open.id)}
           onTogglePause={() => save(open.id, { ...open, paused: !open.paused })}
+          onZeroBase={() => save(open.id, withLedger({ ...open, adjust: 0, adjustSet: true }))}
           onRemoveExtra={i => handleRemoveExtra(open, i)}
           onRemoveMove={k => handleRemoveMove(open, k)}
           serverMode={mode === 'server'}
