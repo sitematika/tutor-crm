@@ -172,6 +172,7 @@ switch ($action) {
       'moves' => $s['moves'] ?? new stdClass(),
       'balance' => $s['balance'] ?? 0,
       'reserved' => $s['reserved'] ?? 0,
+      'paused' => (bool)($s['paused'] ?? false),
       'rate' => $s['rate'] ?? 0,
       'paidTick' => $s['paidTick'] ?? false,
     ]]);

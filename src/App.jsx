@@ -224,7 +224,7 @@ function unpaidDoneKeys(s) {
    предстоящих занятий (без проведённых/отменённых и оплаченных вручную) */
 function autoPaidKeys(s) {
   const rate = s.rate || 0
-  let n = rate > 0 ? Math.floor(avail(s) / rate) : 0
+  let n = rate > 0 && !s.paused ? Math.floor(avail(s) / rate) : 0
   const keys = new Set()
   if (n <= 0) return keys
   const logged = new Set((s.log || []).map(e => e.date + '|' + e.start))
@@ -271,7 +271,7 @@ function payStatus(s) {
 
 /* Ближайший урок ученика (слот + конкретная дата) */
 function nextLessonInfo(s) {
-  if (!s.slots || !s.slots.length) return null
+  if (s.paused || !s.slots || !s.slots.length) return null
   const now = schedNow() // сравниваем в поясе расписания
   const nowDay = todayIdx()
   const nowMin = now.getHours() * 60 + now.getMinutes()
@@ -437,7 +437,7 @@ function Modal({ title, onClose, children }) {
 /* ---------- student form ---------- */
 function StudentForm({ initial, onSave, onClose, onDelete }) {
   const [f, setF] = useState(() => initial || {
-    name: '', level: 'B1', age: '', grade: '', rate: 500, contact: '', notes: '', bookmark: '', balance: 0,
+    name: '', level: 'B1', age: '', grade: '', rate: 500, contact: '', notes: '', bookmark: '', adjust: 0,
     slots: [{ day: 0, start: '16:00', dur: 60 }],
     payments: [], colorIdx: 0, paidTick: false,
   })
@@ -447,7 +447,7 @@ function StudentForm({ initial, onSave, onClose, onDelete }) {
   const submit = e => {
     e.preventDefault()
     if (!f.name.trim()) return
-    onSave({ ...f, name: f.name.trim(), rate: Number(f.rate) || 0, balance: Number(f.balance) || 0 })
+    onSave({ ...f, name: f.name.trim(), rate: Number(f.rate) || 0, adjust: Number(f.adjust) || 0 })
   }
 
   return (
@@ -481,10 +481,16 @@ function StudentForm({ initial, onSave, onClose, onDelete }) {
             <input id="f-rate" type="number" min="0" step="50" value={f.rate} onChange={e => set('rate', e.target.value)} />
           </div>
           <div className="field">
-            <label htmlFor="f-bal">На счету, ₴</label>
-            <input id="f-bal" type="number" step="50" value={f.balance} onChange={e => set('balance', e.target.value)} />
+            <label htmlFor="f-bal">Начальный остаток, ₴</label>
+            <input id="f-bal" type="number" step="50" value={f.adjust ?? 0} onChange={e => set('adjust', e.target.value)} />
           </div>
         </div>
+        <p className="hint">Начальный остаток — сумма до всех оплат и списаний (минус = стартовый долг). Текущий остаток считается сам: остаток + оплаты − уроки.</p>
+        <label className="check-line">
+          <input type="checkbox" checked={!!f.paused} onChange={e => set('paused', e.target.checked)} />
+          <span>Пауза — занятия приостановлены</span>
+        </label>
+        {f.paused && <p className="hint">Все будущие уроки ученика исчезнут из календаря, слоты освободятся. Снимите галочку, чтобы вернуть расписание.</p>}
         <div className="field">
           <label htmlFor="f-contact">Контакт</label>
           <input id="f-contact" value={f.contact} onChange={e => set('contact', e.target.value)} placeholder="Телефон, Telegram…" />
@@ -655,10 +661,11 @@ function StudentsView({ students, onOpen, onAdd }) {
               <div className="name-row">
                 <Ava student={s} />
                 <h3>{s.name}</h3>
+                {s.paused && <span className="lvl bad">⏸ Пауза</span>}
                 <span className="lvl">{s.level}{ageLabel(s) ? ` · ${ageLabel(s)}` : ''}</span>
               </div>
               <div className="meta">
-                <span>{next ? 'Следующий урок: ' + next : 'Расписание не задано'}</span>
+                <span>{s.paused ? 'Занятия приостановлены' : next ? 'Следующий урок: ' + next : 'Расписание не задано'}</span>
                 {s.bookmark && <span className="bookmark">📖 {s.bookmark}</span>}
                 <span>{fmtMoney(s.rate)} / урок · на счету {fmtMoney(avail(s))}</span>
               </div>
@@ -690,7 +697,7 @@ function InviteLink({ join }) {
   )
 }
 
-function ProfileView({ student: s, onBack, onEdit, onPay, onRemoveExtra, onRemoveMove, serverMode, onMakeJoin, onToggleHw, onDeleteHw }) {
+function ProfileView({ student: s, onBack, onEdit, onPay, onTogglePause, onRemoveExtra, onRemoveMove, serverMode, onMakeJoin, onToggleHw, onDeleteHw }) {
   const stmt = statementRows(s)
   const free = avail(s)
   const lessonsLeft = s.rate > 0 && free > 0 ? Math.floor(free / s.rate) : 0
@@ -699,18 +706,20 @@ function ProfileView({ student: s, onBack, onEdit, onPay, onRemoveExtra, onRemov
       <div className="phead">
         <Ava student={s} size={44} />
         <div>
-          <h2>{s.name}</h2>
+          <h2>{s.name}{s.paused && <span className="lvl bad" style={{ marginLeft: 10, verticalAlign: 'middle' }}>⏸ Пауза</span>}</h2>
           <span className="sub">Уровень {s.level}{ageLabel(s) ? ` · ${ageLabel(s)}` : ''} · {fmtMoney(s.rate)} / урок</span>
         </div>
         <div className="actions">
           <button className="btn" onClick={onBack}>← Ко всем</button>
           <button className="btn" onClick={onEdit}>Редактировать</button>
+          <button className="btn" onClick={onTogglePause}>{s.paused ? '▶ Возобновить' : '⏸ Пауза'}</button>
           <button className="btn primary" onClick={onPay}>+ Оплата</button>
         </div>
       </div>
       <div className="pbody">
         <div className="pcol">
           <h4>Расписание</h4>
+          {s.paused && <p className="hint">Занятия на паузе: будущие уроки скрыты из календаря, слоты ниже сохранены и вернутся после «Возобновить».</p>}
           {(s.slots || []).length
             ? s.slots.slice().sort((a, b) => a.day - b.day || toMin(a.start) - toMin(b.start)).map((sl, i) => (
                 <div className="slot-line" key={i}>
@@ -817,7 +826,7 @@ function ProfileView({ student: s, onBack, onEdit, onPay, onRemoveExtra, onRemov
                 {s.adjust ? (
                   <div className="stmt-row stmt-base">
                     <span className="stmt-date">—</span>
-                    <span className="stmt-label">Начальный остаток (без записей)</span>
+                    <span className="stmt-label">Начальный остаток (меняется в «Редактировать»)</span>
                     <span className="stmt-delta">{fmtMoney(s.adjust)}</span>
                     <span className="stmt-run">{fmtMoney(s.adjust)}</span>
                   </div>
@@ -900,11 +909,13 @@ function WeekView({ students, dates, onLessonClick, onAddLesson, onToggleMark, o
       if (di == null) return
       items.push({ ...base, day: di, startMin: loc.min, lstart: loc.time, ldate: loc.date, same: loc.same })
     }
+    const todayS = iso(schedNow())
     for (let k = -1; k <= dates.length; k++) {
       const d = addDays(dates[0], k)
       const dIso = iso(d)
       const wd = (d.getDay() + 6) % 7
       students.forEach(s => {
+        if (s.paused && dIso >= todayS) return // на паузе: будущих уроков нет, слот свободен
         const moves = s.moves || {}
         ;(s.slots || []).forEach(sl => {
           if (sl.day !== wd || moves[dIso + '|' + sl.start]) return
@@ -1471,15 +1482,23 @@ function rekeyStudent(st, fromKey, toKey) {
   return out
 }
 
-/* Самопочинка: у уроков, перенесённых до обновления, отметки остались на
-   старой дате — переносим их на новое место один раз при загрузке */
-function migrateMoves(data) {
+/* Самопочинка данных при загрузке (одноразовая, по факту):
+   1) у уроков, перенесённых до обновления, отметки остались на старой дате —
+      переносим их на новое место;
+   2) старое поле «На счету» в форме могло увести базу в минус ровно на сумму
+      оплат галочкой за ещё не проведённые уроки — это не долг, база = 0 */
+function repairData(data) {
   let changed = false
   const next = { ...data }
   for (const [id, s] of Object.entries(data)) {
-    if (id.startsWith('_') || !s || !s.moves) continue
+    if (id.startsWith('_') || !s) continue
     let st = s
-    for (const [orig, mv] of Object.entries(s.moves)) {
+    const led = withLedger(st)
+    if (led.adjust < 0 && led.reserved > 0 && led.adjust === -led.reserved) {
+      st = { ...st, adjust: 0 }
+      changed = true
+    }
+    for (const [orig, mv] of Object.entries(st.moves || {})) {
       const toKey = mv.date + '|' + mv.start
       const [od, os] = orig.split('|')
       const stale = (st.marks || {})[orig]
@@ -1638,13 +1657,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
   }, [])
 
   const handleFormSave = form => {
-    // «На счету» из формы задаёт базу: adjust подбирается так, чтобы
-    // пересчёт (база + оплаты − списания) дал ровно введённую сумму
-    const applyBase = merged => {
-      const withAdjust = { ...merged, adjust: 0 }
-      withAdjust.adjust = (Number(form.balance) || 0) - sumPayments(withAdjust) + sumCharges(withAdjust)
-      return withLedger(withAdjust)
-    }
+    const applyBase = merged => withLedger({ ...merged, adjust: Number(form.adjust) || 0 })
     if (editing === 'new') {
       const id = uid()
       const used = students.map(s => s.colorIdx % COLORS.length)
@@ -1821,10 +1834,9 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
 
   const handleMakeJoin = s => save(s.id, { ...s, join: uid() + uid() })
 
-  // самопочинка привязок у ранее перенесённых уроков (см. migrateMoves)
   useEffect(() => {
     if (!data) return
-    const { changed, next } = migrateMoves(data)
+    const { changed, next } = repairData(data)
     if (changed) setData(next)
   }, [data])
 
@@ -1874,6 +1886,7 @@ function Crm({ mode, token, onLogout, onAuthFail }) {
           onBack={() => setOpenId(null)}
           onEdit={() => setEditing(open.id)}
           onPay={() => setPayingId(open.id)}
+          onTogglePause={() => save(open.id, { ...open, paused: !open.paused })}
           onRemoveExtra={i => handleRemoveExtra(open, i)}
           onRemoveMove={k => handleRemoveMove(open, k)}
           serverMode={mode === 'server'}
@@ -2164,7 +2177,7 @@ function StudentApp({ join }) {
 
   const slots = (stu.slots || []).slice().sort((a, b) => a.day - b.day || toMin(a.start) - toMin(b.start))
   const todayStr = iso(nowDate())
-  const upcoming = (stu.extra || []).filter(ex => ex.date >= todayStr)
+  const upcoming = stu.paused ? [] : (stu.extra || []).filter(ex => ex.date >= todayStr)
     .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start))
 
   return (
@@ -2206,7 +2219,8 @@ function StudentApp({ join }) {
         </section>
         <section className="pcard">
           <h4>Расписание</h4>
-          {slots.length
+          {stu.paused && <p className="hint">Занятия временно приостановлены. Расписание вернётся, когда возобновим уроки.</p>}
+          {stu.paused ? null : slots.length
             ? slots.map((sl, i) => (
                 <div className="slot-line" key={i}>
                   <span className="d">{DAYS[sl.day]}</span>
@@ -2224,7 +2238,7 @@ function StudentApp({ join }) {
               <span className="t">{ex.dur} мин</span>
             </div>
           ))}
-          {Object.entries(stu.moves || {}).filter(([, mv]) => mv.date >= todayStr)
+          {Object.entries(stu.moves || {}).filter(([, mv]) => !stu.paused && mv.date >= todayStr)
             .sort((a, b) => a[1].date.localeCompare(b[1].date))
             .map(([k, mv]) => (
               <div className="slot-line" key={'m' + k}>
